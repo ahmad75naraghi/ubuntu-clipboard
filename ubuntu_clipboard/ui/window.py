@@ -136,7 +136,7 @@ if _HAS_GTK:
             close_btn = Gtk.Button()
             close_btn.set_icon_name("window-close-symbolic")
             close_btn.add_css_class("icon-btn")
-            close_btn.connect("clicked", lambda *_: self.set_visible(False))
+            close_btn.connect("clicked", lambda *_: self.close())
             top_row.append(close_btn)
 
             # search
@@ -405,7 +405,7 @@ if _HAS_GTK:
             name = Gdk.keyval_name(keyval)
             # Esc close
             if name == "Escape":
-                self.set_visible(False)
+                self.close()
                 return True
             if name == "Down":
                 self._selected_idx = min(self._selected_idx+1, len(self._items)-1)
@@ -459,7 +459,7 @@ if _HAS_GTK:
             self._refresh()
 
         def _on_paste(self, item: ClipboardItem):
-            # copy to clipboard then simulate paste
+            # copy to clipboard then simulate paste — hide, paste, then close window so process exits
             self.set_visible(False)
             # small delay to let window hide and focus return
             def do():
@@ -467,13 +467,13 @@ if _HAS_GTK:
                     if item.type == "image":
                         ok = write_image_b64(item.content)
                     else:
-                        # for file type, copy file uri? simplify as text
                         ok = write_text(item.content)
                     if ok:
-                        # extra delay then paste
                         GLib.timeout_add(160, lambda: (simulate_paste(delay=0.05), False))
                 except Exception:
                     pass
+                # close window after paste so lock is cleared and no flicker
+                GLib.timeout_add(350, lambda: (self.close(), False)[1])
                 return False
             GLib.timeout_add(80, do)
 
@@ -483,7 +483,7 @@ if _HAS_GTK:
 
         def toggle_visible(self):
             if self.is_visible():
-                self.set_visible(False)
+                self.close()
             else:
                 self._refresh()
                 self.present()
