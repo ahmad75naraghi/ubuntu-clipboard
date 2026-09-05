@@ -47,21 +47,42 @@ elif [[ -x "$HOME/.local/bin/ubuntu-clipboard" ]]; then
 fi
 
 # تنظیم مقادیر کلید سفارشی — از مسیر کامل استفاده می‌کنیم تا در Wayland هم کار کند
+# ——— بررسی custom1 تکراری ———
+# اگر custom1 همین Super+v و command ubuntu-clipboard دارد، تکراری است — پاکش می‌کنیم تا تداخل حل شود
+C1_CMD=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ command 2>/dev/null || echo "")
+C1_BIND=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ binding 2>/dev/null || echo "")
+C0_CMD=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command 2>/dev/null || echo "")
+# اگر custom1 تکراری ubuntu-clipboard است، حذف از لیست و reset
+if [[ "$C1_CMD" == *"ubuntu-clipboard"* ]]; then
+  echo "  🧹 custom1 تکراری تشخیص داده شد ($C1_CMD) — حذف از لیست"
+  # لیست فعلی را بدون custom1 بازسازی
+  CURR=$(gsettings get $SCHEMA custom-keybindings 2>/dev/null)
+  # حذف custom1 از لیست
+  NEW2=$(echo "$CURR" | sed "s|'/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/'||" | sed "s|, ,|, |" | sed "s|\[, |[|" | sed "s|, ]|]|" | sed "s|,,|,|g")
+  # اگر NEW2 خالی شد، بازسازی با ubuntu-clipboard
+  if [[ "$NEW2" == "@as []" || "$NEW2" == "[]" ]]; then
+    NEW2="['$KEY_PATH']"
+  else
+    # اطمینان ubuntu-clipboard در لیست هست
+    if [[ "$NEW2" != *"ubuntu-clipboard"* ]]; then
+      NEW2=$(echo "$NEW2" | sed "s|]$|, '$KEY_PATH']|")
+    fi
+  fi
+  gsettings set $SCHEMA custom-keybindings "$NEW2"
+  echo "  ✓ لیست جدید: $NEW2"
+  # reset custom1
+  gsettings reset org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ name 2>/dev/null || true
+  gsettings reset org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ command 2>/dev/null || true
+  gsettings reset org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ binding 2>/dev/null || true
+fi
+
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" name 'Clipboard — Win+V'
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" command "$BIN --toggle"
-# بررسی تداخل Super+v — اگر custom0/1 هم Super+v دارد، هشدار و فیکس
-CONFLICT=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding 2>/dev/null || echo "")
-CONFLICT2=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ binding 2>/dev/null || echo "")
-if [[ "$CONFLICT" == *"<Super>v"* || "$CONFLICT2" == *"<Super>v"* ]]; then
-  echo "  ⚠️  هشدار: Super+v قبلا توسط custom0/1 گرفته شده — میانبر جایگزین Super+Shift+v هم اضافه می‌شود"
-  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super><Shift>v'
-  # try original anyway, but fallback is shift
-else
-  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super>v'
-fi
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super>v'
+echo "  ✓ Binding تنظیم شد به <Super>v (Win+V)"
 # نمایش وضعیت grab
 sleep 0.5
-journalctl --user --since "10 seconds ago" 2>&1 | grep -i "grab accelerator" | head -n 5 || true
+journalctl --user --since "10 seconds ago" 2>&1 | grep -i "grab accelerator" | head -n 5 || echo "  (no grab error — میانبر موفق)"
 
 echo "✓ میانبر Win+V ثبت شد!"
 echo "  Command: ubuntu-clipboard --toggle"
