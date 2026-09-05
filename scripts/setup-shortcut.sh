@@ -27,9 +27,28 @@ else
   echo "  ✓ لیست به‌روز شد: $NEW"
 fi
 
-# تنظیم مقادیر کلید سفارشی
+# تشخیص مسیر کامل اجرایی — مهم! چون Top Bar/shell بدون PATH اجرا می‌شود
+BIN_CANDIDATES=(
+  "$HOME/.local/bin/ubuntu-clipboard"
+  "$HOME/.local/share/ubuntu-clipboard/venv/bin/ubuntu-clipboard"
+  "/usr/local/bin/ubuntu-clipboard"
+  "$(command -v ubuntu-clipboard 2>/dev/null || echo ubuntu-clipboard)"
+)
+BIN=""
+for c in "${BIN_CANDIDATES[@]}"; do
+  if [[ -x "$c" ]]; then BIN="$c"; break; fi
+done
+[[ -z "$BIN" ]] && BIN="ubuntu-clipboard"
+# اگر venv باشد، همان را بگذار
+if [[ -x "$HOME/.local/share/ubuntu-clipboard/venv/bin/ubuntu-clipboard" ]]; then
+  BIN="$HOME/.local/share/ubuntu-clipboard/venv/bin/ubuntu-clipboard"
+elif [[ -x "$HOME/.local/bin/ubuntu-clipboard" ]]; then
+  BIN="$HOME/.local/bin/ubuntu-clipboard"
+fi
+
+# تنظیم مقادیر کلید سفارشی — از مسیر کامل استفاده می‌کنیم تا در Wayland هم کار کند
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" name 'Clipboard — Win+V'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" command 'ubuntu-clipboard --toggle'
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" command "\"$BIN\" --toggle"
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super>v'
 
 echo "✓ میانبر Win+V ثبت شد!"

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Clipboard Settings
+Name[fa]=تنظیمات کلیپ‌بورد
+Comment=Configure Ubuntu Clipboard — history limit, theme, window size
+Comment[fa]=تنظیمات کلیپ‌بورد — حد تاریخچه، تم، اندازه پنجره
+Exec=ubuntu-clipboard --settings
+Icon=ubuntu-clipboard
+Terminal=false
+Type=Application
+Categories=Utility;Settings;
+Keywords=clipboard;settings;win+v;
+NoDisplay=false
+StartupNotify=true

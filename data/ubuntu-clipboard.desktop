@@ -11,3 +11,23 @@ Categories=Utility;GTK;
 StartupNotify=false
 Keywords=clipboard;win+v;paste;history;
 X-GNOME-Autostart-enabled=true
+StartupWMClass=com.ubuntu.clipboard
+Actions=Open;Settings;Status;
+
+[Desktop Action Open]
+Name=Open Clipboard
+Name[fa]=باز کردن کلیپ‌بورد
+Exec=ubuntu-clipboard --toggle
+OnlyShowIn=GNOME;Unity;
+
+[Desktop Action Settings]
+Name=Settings
+Name[fa]=تنظیمات
+Exec=ubuntu-clipboard --settings
+OnlyShowIn=GNOME;Unity;
+
+[Desktop Action Status]
+Name=Status
+Name[fa]=وضعیت
+Exec=ubuntu-clipboard --status
+OnlyShowIn=GNOME;Unity;

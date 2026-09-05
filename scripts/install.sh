@@ -16,8 +16,6 @@ echo ""
 # 1. وابستگی‌های سیستمی
 echo "📦 بررسی وابستگی‌ها..."
 MISSING=()
-check_pkg() { dpkg -l "$1" &>/dev/null || MISSING+=("$1"); }
-
 # Python GI
 if ! python3 -c "import gi" 2>/dev/null; then
   MISSING+=("python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1")
@@ -29,18 +27,28 @@ for cmd in wl-copy xclip; do
     fi
   fi
 done
+# AppIndicator برای آیکون تسک‌بار
+if ! dpkg -l gir1.2-ayatanaappindicator3-0.1 &>/dev/null && ! dpkg -l gir1.2-appindicator3-0.1 &>/dev/null; then
+  MISSING+=("gir1.2-ayatanaappindicator3-0.1")
+fi
+if ! dpkg -l gnome-shell-extension-appindicator &>/dev/null; then
+  MISSING+=("gnome-shell-extension-appindicator")
+fi
 
 if [ ${#MISSING[@]} -ne 0 ]; then
   echo "  نصب وابستگی‌ها: ${MISSING[*]}"
   echo "  sudo apt update && sudo apt install -y ${MISSING[*]} wl-clipboard xclip xdotool wtype"
   if command -v apt &>/dev/null; then
     echo ""
-    read -p "  آیا با sudo نصب کنم؟ [Y/n] " ans
+    # اگر در محیط غیرتعاملی هستیم (CI) خودکار Y
+    if [[ ! -t 0 ]]; then ans="Y"; else read -p "  آیا با sudo نصب کنم؟ [Y/n] " ans; fi
     if [[ "$ans" != "n" && "$ans" != "N" ]]; then
       sudo apt update
-      sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 wl-clipboard xclip xdotool  || true
-      # wtype ممکن است در همه نسخه‌ها نباشد
+      sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 wl-clipboard xclip xdotool gir1.2-ayatanaappindicator3-0.1 gnome-shell-extension-appindicator || true
+      sudo apt install -y gir1.2-appindicator3-0.1  || true
       sudo apt install -y wtype  || echo "  ⚠️ wtype نصب نشد (اختیاری برای Wayland)"
+      # فعال‌سازی افزونه AppIndicator برای دیدن آیکون در Top Bar
+      gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || gnome-extensions enable appindicator@rgcjonas.gmail.com 2>/dev/null || true
     fi
   fi
 else
@@ -90,10 +98,13 @@ gtk-update-icon-cache "$HOME/.local/share/icons" 2>/dev/null || true
 mkdir -p "$DESKTOP_DIR" "$AUTOSTART_DIR"
 cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$DESKTOP_DIR/"
 cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$AUTOSTART_DIR/"
+# settings launcher هم
+cp "$REPO_DIR/data/ubuntu-clipboard-settings.desktop" "$DESKTOP_DIR/" 2>/dev/null || true
 # به‌روزرسانی Exec اگر venv است
 if [ -d "$VENV_DIR" ]; then
   sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$DESKTOP_DIR/ubuntu-clipboard.desktop"
   sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$AUTOSTART_DIR/ubuntu-clipboard.desktop"
+  sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$DESKTOP_DIR/ubuntu-clipboard-settings.desktop" 2>/dev/null || true
 fi
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 
@@ -105,25 +116,51 @@ else
   echo "  ⚠️ gsettings یافت نشد — میانبر را دستی بسازید"
 fi
 
-# 5. تست
+# 5. تست و اجرا
+# kill old
+pkill -f ubuntu-clipboard 2>/dev/null || true
+sleep 0.5
+
 echo ""
 echo "✅ نصب کامل شد!"
 echo ""
-echo "  اجرا:        ubuntu-clipboard"
-echo "  دیمن:        ubuntu-clipboard-daemon"
+echo "  اجرا:        ubuntu-clipboard              (پنجره باز می‌شود)"
+echo "  پس‌زمینه:    ubuntu-clipboard --hidden     (با آیکون تسک‌بار)"
 echo "  میانبر:      Win+V (Super+V)"
-echo "  تنظیمات:     داخل پنجره کلیپ‌بورد → ⚙️"
+echo "  تنظیمات:     ubuntu-clipboard --settings   یا آیکون Top Bar → ⚙️ تنظیمات"
+echo "  وضعیت:       ubuntu-clipboard --status"
+echo "  لاگ:         cat /tmp/ubuntu-clipboard.log"
 echo "  DB:          ~/.config/ubuntu-clipboard/history.db"
 echo ""
-echo "  برای اجرای فوری:"
-echo "    ubuntu-clipboard &"
-echo "  سپس Win+V را بزنید."
+echo "  آیکون تسک‌بار: در Top Bar کنار ساعت/وای‌فای ببینید — کلیک = باز شدن کلیپ‌بورد"
+echo "  اگر آیکون را نمی‌بینید:"
+echo "    sudo apt install gnome-shell-extension-appindicator"
+echo "    gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com"
+echo "    سپس لاگ‌اوت/لاگین کنید"
 echo ""
-# اجرا؟
-read -p "  همین حالا اجرا کنم؟ [Y/n] " run
+# اجرا — همیشه با لاگ
+echo "🚀 اجرای برنامه..."
+if [[ ! -t 0 ]]; then run="Y"; else read -p "  همین حالا اجرا کنم؟ [Y/n] " run; fi
 if [[ "$run" != "n" && "$run" != "N" ]]; then
-  nohup ubuntu-clipboard --hidden >/tmp/ubuntu-clipboard.log 2>&1 &
-  echo "  ✓ اجرا شد — لاگ: /tmp/ubuntu-clipboard.log"
-  sleep 1
-  echo "  Win+V را امتحان کنید!"
+  # اجرای مخفی با آیکون تسک‌بار
+  nohup "$BIN_DIR/ubuntu-clipboard" --hidden >/tmp/ubuntu-clipboard.log 2>&1 &
+  sleep 1.2
+  if pgrep -f ubuntu-clipboard >/dev/null; then
+    echo "  ✓ اجرا شد — PID: $(pgrep -f ubuntu-clipboard | head -1)"
+    echo "  ✓ لاگ: /tmp/ubuntu-clipboard.log"
+    echo ""
+    echo "  👉 حالا تست کنید:"
+    echo "     1) یک متن کپی کنید (Ctrl+C)"
+    echo "     2) روی آیکون کلیپ‌بورد در Top Bar کلیک کنید"
+    echo "     3) یا Win+V بزنید"
+    echo "     4) ubuntu-clipboard --status  برای دیدن وضعیت"
+    echo "     5) ubuntu-clipboard --settings برای تنظیمات"
+  else
+    echo "  ✗ اجرا نشد — لاگ:"
+    cat /tmp/ubuntu-clipboard.log 2>/dev/null || echo "    (لاگ خالی)"
+    echo "  سعی کنید دستی: ubuntu-clipboard --debug"
+  fi
 fi
+echo ""
+echo "  برای عیب‌یابی: ubuntu-clipboard --status"
+echo "  برای تنظیمات: ubuntu-clipboard --settings"
