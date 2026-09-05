@@ -1,17 +1,16 @@
 [Desktop Entry]
 Name=Clipboard
 Name[fa]=کلیپ‌بورد
-Comment=Windows-like Clipboard for Ubuntu — Win+V
+Comment=Windows-like Clipboard for Ubuntu — Win+V (هر Win+V یک پنجره مستقل)
 Comment[fa]=کلیپ‌بورد حرفه‌ای شبیه ویندوز — Win+V
-Exec=ubuntu-clipboard --hidden
+Exec=ubuntu-clipboard
 Icon=ubuntu-clipboard
 Terminal=false
 Type=Application
 Categories=Utility;GTK;
-StartupNotify=false
+StartupNotify=true
 Keywords=clipboard;win+v;paste;history;
-X-GNOME-Autostart-enabled=true
-StartupWMClass=com.ubuntu.clipboard
+StartupWMClass=com.ubuntu.clipboard.window
 Actions=Open;Settings;Status;
 
 [Desktop Action Open]

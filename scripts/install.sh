@@ -119,13 +119,18 @@ cp "$REPO_DIR/data/icons/ubuntu-clipboard.png" "$HOME/.local/share/icons/" 2>/de
 gtk-update-icon-cache "$HOME/.local/share/icons" 2>/dev/null || true
 mkdir -p "$DESKTOP_DIR" "$AUTOSTART_DIR"
 cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$DESKTOP_DIR/"
-cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$AUTOSTART_DIR/"
+cp "$REPO_DIR/data/ubuntu-clipboard-daemon.desktop" "$AUTOSTART_DIR/ubuntu-clipboard-daemon.desktop"
+# also keep a copy of main for manual hidden autostart (disabled by default)
+cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$AUTOSTART_DIR/ubuntu-clipboard.desktop" 2>/dev/null || true
+# disable the window autostart by default (we want only daemon) — remove or hide
+rm -f "$AUTOSTART_DIR/ubuntu-clipboard.desktop" 2>/dev/null || true
 # settings launcher هم
 cp "$REPO_DIR/data/ubuntu-clipboard-settings.desktop" "$DESKTOP_DIR/" 2>/dev/null || true
 # به‌روزرسانی Exec اگر venv است
 if [ -d "$VENV_DIR" ]; then
   sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$DESKTOP_DIR/ubuntu-clipboard.desktop"
-  sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$AUTOSTART_DIR/ubuntu-clipboard.desktop"
+  sed -i "s|Exec=ubuntu-clipboard --daemon|Exec=$BIN_DIR/ubuntu-clipboard --daemon|" "$AUTOSTART_DIR/ubuntu-clipboard-daemon.desktop"
+  sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$AUTOSTART_DIR/ubuntu-clipboard-daemon.desktop" 2>/dev/null || true
   sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$DESKTOP_DIR/ubuntu-clipboard-settings.desktop" 2>/dev/null || true
 fi
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
@@ -141,13 +146,15 @@ fi
 # 5. تست و اجرا
 # kill old
 pkill -f ubuntu-clipboard 2>/dev/null || true
+pkill -f ubuntu_clipboard.tray 2>/dev/null || true
+rm -f ~/.cache/ubuntu-clipboard/window.pid 2>/dev/null || true
 sleep 0.5
 
 echo ""
 echo "✅ نصب کامل شد!"
 echo ""
-echo "  اجرا:        ubuntu-clipboard              (پنجره باز می‌شود)"
-echo "  پس‌زمینه:    ubuntu-clipboard --hidden     (بدون چشمک، با Win+V)"
+echo "  اجرا:        ubuntu-clipboard              (پنجره Win+V)"
+echo "  دیمن:        ubuntu-clipboard --daemon     (پس‌زمینه، بدون پنجره)"
 echo "  میانبر:      Win+V (Super+V)"
 echo "  تنظیمات:     ubuntu-clipboard --settings   یا آیکون Top Bar → ⚙️ تنظیمات"
 echo "  وضعیت:       ubuntu-clipboard --status"
@@ -163,8 +170,8 @@ echo ""
 echo "🚀 اجرای برنامه..."
 if [[ ! -t 0 ]]; then run="Y"; else read -p "  همین حالا اجرا کنم؟ [Y/n] " run; fi
 if [[ "$run" != "n" && "$run" != "N" ]]; then
-  # اجرای مخفی با آیکون تسک‌بار
-  nohup "$BIN_DIR/ubuntu-clipboard" --hidden >/tmp/ubuntu-clipboard.log 2>&1 &
+  # اجرای دیمن (بدون پنجره) — پایدار و بدون چشمک
+  nohup "$BIN_DIR/ubuntu-clipboard" --daemon >/tmp/ubuntu-clipboard.log 2>&1 &
   sleep 1.2
   if pgrep -f ubuntu-clipboard >/dev/null; then
     echo "  ✓ اجرا شد — PID: $(pgrep -f ubuntu-clipboard | head -1)"
