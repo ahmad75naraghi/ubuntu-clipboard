@@ -70,6 +70,16 @@ if _HAS_GTK:
 
             self.set_title("Clipboard")
             self.set_default_size(cfg.window_width, cfg.window_height)
+            # آیکون برای جلوگیری از Unknown در داک
+            try:
+                self.set_icon_name("ubuntu-clipboard")
+            except Exception:
+                pass
+            try:
+                # WM class برای تطابق با .desktop
+                self.set_property("application-id", "com.ubuntu.clipboard")
+            except Exception:
+                pass
             self.set_resizable(True)
             # شیشه‌ای و شناور
             self.add_css_class("clipboard-window")

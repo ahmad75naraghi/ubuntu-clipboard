@@ -97,51 +97,56 @@ if _HAS_GTK:
                 self.tray = None
 
         def do_activate(self):
-            # Called on first launch and when second instance calls activate
+            # Called on first launch — only first time we create/hold window
+            # Subsequent activates (e.g. from gapplication) should NOT toggle automatically
+            # Toggling is explicitly handled in do_command_line for --toggle
             if not self.window:
                 from .ui.window import ClipboardWindow
                 self.window = ClipboardWindow(self, self.history)
-            # first run: show unless --hidden was passed initially
             if not self._first_activated:
                 self._first_activated = True
                 # if launched hidden, don't show
                 if "--hidden" not in sys.argv and "-h" not in sys.argv and "--daemon" not in sys.argv:
                     self.window.present()
                 self.hold()
-            else:
-                # subsequent activate without args => toggle
-                self.toggle_window()
+            # else: already activated — do nothing, wait for explicit --toggle/--show
 
         def do_command_line(self, cmdline):
             opts = cmdline.get_options_dict()
-            # --show / --toggle => show/toggle
-            if opts.contains("toggle") or "--toggle" in sys.argv or "--show" in sys.argv or opts.contains("show"):
-                if self.window and self._first_activated:
-                    # --show always show, --toggle toggles
-                    if "--show" in sys.argv or opts.contains("show"):
-                        if not self.window.is_visible():
-                            self.window.present()
-                    else:
-                        self.toggle_window()
-                else:
-                    self.do_activate()
-                    if self.window and not self.window.is_visible():
-                        self.window.present()
-                return 0
-            if opts.contains("hidden"):
+            # ensure window exists for any command
+            if not self.window and not self._first_activated:
+                # first command line before do_activate — create window via do_activate logic
                 self.do_activate()
+            elif not self.window:
+                from .ui.window import ClipboardWindow
+                self.window = ClipboardWindow(self, self.history)
+                self._first_activated = True
+                self.hold()
+
+            # --toggle / --show
+            if opts.contains("toggle") or "--toggle" in sys.argv or "--show" in sys.argv or opts.contains("show"):
+                # --show always show, --toggle toggles
+                if "--show" in sys.argv or opts.contains("show"):
+                    if not self.window.is_visible():
+                        self.window.present()
+                else:
+                    self.toggle_window()
+                return 0
+            if opts.contains("hidden") or "--hidden" in sys.argv:
                 if self.window and self.window.is_visible():
                     self.window.set_visible(False)
                 return 0
-            # settings via command line (gapplication)
-            if "--settings" in sys.argv:
-                self.do_activate()
+            # settings via command line
+            if "--settings" in sys.argv or opts.contains("settings"):
                 if self.window:
-                    self.window.present()
+                    if not self.window.is_visible():
+                        self.window.present()
                     from gi.repository import GLib
                     GLib.timeout_add(300, lambda: (self._open_settings_from_app(), False)[1])
                 return 0
-            self.do_activate()
+            # no flag — just ensure window is shown (e.g. clicking dock icon)
+            if self.window and not self.window.is_visible():
+                self.window.present()
             return 0
 
         def _open_settings_from_app(self):
@@ -152,6 +157,12 @@ if _HAS_GTK:
                 print(f"settings open failed: {e}")
 
         def toggle_window(self):
+            # debounce: ignore rapid toggles within 250ms (prevents flicker loop)
+            import time
+            now = time.monotonic()
+            if hasattr(self, "_last_toggle") and now - self._last_toggle < 0.25:
+                return
+            self._last_toggle = now
             if not self.window:
                 self.do_activate()
                 return

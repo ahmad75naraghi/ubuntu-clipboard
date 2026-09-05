@@ -43,36 +43,28 @@ class TrayIndicator:
 
     def setup(self):
         """ساخت آیکون — بهترین backend موجود را انتخاب کن"""
-        # سعی کن اول pystray اگر GI با Gtk4 تداخل دارد
-        # pystray مستقل است و با Wayland هم بهتر کار می‌کند
-        if self._try_pystray():
-            return True
-
-        if not _HAS_GI:
-            print("⚠️  GI موجود نیست — آیکون تسک‌بار ساخته نشد. pip install pystray را امتحان کنید.")
+        # --no-tray flag: disable tray for debugging
+        import sys
+        if "--no-tray" in sys.argv:
+            print("  (tray disabled via --no-tray)")
             return False
-
-        # 1) AyatanaAppIndicator3 (Ubuntu 22.04+ پیش‌فرض) — فقط اگر Gtk4 لود نشده باشد
-        # چون Gtk3 و Gtk4 همزمان لود نمی‌شوند
-        try:
-            import gi
-            # اگر قبلاً Gtk 4 لود شده، Ayatana (Gtk3) را اسکیپ کن و برو pystray
-            # gi.get_required_version('Gtk') برمی‌گرداند
-            pass
-        except Exception:
-            pass
-        # تلاش کن ولی اگر تداخل نسخه بود، pystray قبلاً موفق شده
+        # 1) Ayatana is native for Ubuntu GNOME — no flicker
         if self._try_ayatana():
             return True
-        # 2) AppIndicator3 قدیمی
+        # 2) AppIndicator fallback
         if self._try_appindicator():
             return True
-        # 3) Gtk.StatusIcon (deprecated ولی هنوز کار می‌کند)
+        # 3) StatusIcon
         if self._try_status_icon():
             return True
+        # 4) pystray last resort — can cause Unknown window flicker on Wayland, so only if explicitly wanted
+        # Enable with --with-pystray or env UBUNTU_CLIPBOARD_USE_PYSTRAY=1
+        import os
+        if "--with-pystray" in sys.argv or os.environ.get("UBUNTU_CLIPBOARD_USE_PYSTRAY") == "1":
+            if self._try_pystray():
+                return True
 
         print("⚠️  هیچ backend برای سینی سیستم پیدا نشد — افزونه Top Bar را نصب کنید: sudo apt install gir1.2-ayatanaappindicator3-0.1 gnome-shell-extension-appindicator")
-        print("   یا: pip install pystray Pillow — سپس دوباره اجرا کنید")
         return False
 
     def _try_pystray(self) -> bool:
@@ -279,20 +271,19 @@ class TrayIndicator:
 
     def _do_settings(self):
         try:
-            # اگر پنجره اصلی هست، تنظیمات را همانجا باز کن
+            # اگر پنجره اصلی هست و visible است، از آن به عنوان parent استفاده کن
+            # اگر hidden است، بدون parent باز کن تا پنجره اصلی بی‌دلیل present نشود
+            parent = None
             if hasattr(self.app, "window") and self.app.window:
-                # present first to ensure parent
                 try:
-                    self.app.window.present()
+                    if self.app.window.is_visible():
+                        parent = self.app.window
                 except Exception:
-                    pass
-                from .ui.settings import show_settings
-                show_settings(self.app.window, self.app.history)
-            else:
-                # standalone settings
-                from .ui.settings import show_settings
-                from .history import HistoryManager
-                show_settings(None, HistoryManager())
+                    parent = None
+            from .ui.settings import show_settings
+            from .history import HistoryManager
+            hm = getattr(self.app, "history", None) or HistoryManager()
+            show_settings(parent, hm)
         except Exception as e:
             print(f"settings failed: {e}")
 
