@@ -16,6 +16,13 @@ from typing import Optional
 from .history import HistoryManager
 from .config import get_config
 from .clipboard import read_text_fallback, read_image_fallback, detect_session
+try:
+    from .log import log, log_daemon
+    _HAS_LOG=True
+except Exception:
+    _HAS_LOG=False
+    def log(m,l="INFO"): print(m)
+    def log_daemon(a,b=""): print(f"DAEMON {a} {b}")
 
 class ClipboardDaemon:
     def __init__(self, history: Optional[HistoryManager] = None, interval: float = 0.35):
@@ -32,6 +39,9 @@ class ClipboardDaemon:
         return hashlib.sha256(s.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
     def _poll_once(self):
+        if _HAS_LOG:
+            # only log when something changes to avoid spam
+            pass
         # try image first? text is more common
         # If image mime available and size > threshold we treat as image
         img = None
@@ -54,6 +64,7 @@ class ClipboardDaemon:
                 if len(b64) > 800_000:  # ~600KB image
                     # skip huge
                     return
+                if _HAS_LOG: log_daemon("ADD_IMAGE", f"size={len(b64)}")
                 self.history.add_image_base64(b64)
                 self._last_text = None
                 return
@@ -80,6 +91,7 @@ class ClipboardDaemon:
         # some apps spam clipboard with same selection; also ignore very short if repeated?
         self._last_hash = h
         self._last_text = txt
+        if _HAS_LOG: log_daemon("ADD_TEXT", f"len={len(txt)} preview={txt[:40]!r}")
         self.history.add(txt)
 
     def _try_gtk_monitor(self) -> bool:
@@ -117,6 +129,7 @@ class ClipboardDaemon:
             return False
 
     def start(self, use_gtk: bool = True):
+        if _HAS_LOG: log_daemon("START", f"use_gtk={use_gtk} interval={self.interval}")
         if self._running:
             return
         self._running = True
@@ -136,6 +149,7 @@ class ClipboardDaemon:
         self._thread.start()
 
     def stop(self):
+        if _HAS_LOG: log_daemon("STOP", "")
         self._running = False
         if self._thread:
             self._thread.join(timeout=1.0)

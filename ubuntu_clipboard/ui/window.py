@@ -13,6 +13,13 @@ from ..history import HistoryManager, ClipboardItem
 from ..config import get_config
 from ..clipboard import write_text, write_image_b64
 from ..paste import simulate_paste
+try:
+    from ..log import log, log_window
+    _HAS_LOG=True
+except Exception:
+    _HAS_LOG=False
+    def log(m,l="INFO"): print(m)
+    def log_window(a,b=""): print(f"WINDOW {a} {b}")
 
 # ─── تلاش برای GTK ───
 _HAS_GTK = False
@@ -68,6 +75,7 @@ if _HAS_GTK:
             self._selected_idx = 0
             self._items: list[ClipboardItem] = []
 
+            if _HAS_LOG: log_window("CREATE", f"size={cfg.window_width}x{cfg.window_height} theme={cfg.theme}")
             self.set_title("Clipboard")
             self.set_default_size(cfg.window_width, cfg.window_height)
             # آیکون برای جلوگیری از Unknown در داک
@@ -203,7 +211,9 @@ if _HAS_GTK:
 
             # click outside to close?
             # focus
-            self.connect("show", lambda *_: self._refresh())
+            self.connect("show", lambda *_: (log_window("SHOW", "window shown") if _HAS_LOG else None, self._refresh())[1])
+            self.connect("hide", lambda *_: log_window("HIDE", "window hidden") if _HAS_LOG else None)
+            self.connect("close-request", lambda *_: (log_window("CLOSE_REQUEST", "") if _HAS_LOG else None, False)[1])
 
         def _load_css(self):
             try:
@@ -217,6 +227,7 @@ if _HAS_GTK:
 
         # ── data ──
         def _refresh(self):
+            if _HAS_LOG: log_window("REFRESH", f"query={self._query!r}")
             items = self.history.list(query=self._query, limit=150)
             self._items = items
             # clear
@@ -459,6 +470,7 @@ if _HAS_GTK:
             self._refresh()
 
         def _on_paste(self, item: ClipboardItem):
+            if _HAS_LOG: log_window("PASTE", f"id={item.id} type={item.type}")
             # copy to clipboard then simulate paste — hide, paste, then close window so process exits
             self.set_visible(False)
             # small delay to let window hide and focus return
@@ -482,7 +494,9 @@ if _HAS_GTK:
             show_settings(self, self.history)
 
         def toggle_visible(self):
+            if _HAS_LOG: log_window("TOGGLE", f"is_visible={self.is_visible()}")
             if self.is_visible():
+                if _HAS_LOG: log_window("TOGGLE_HIDE", "closing")
                 self.close()
             else:
                 self._refresh()
