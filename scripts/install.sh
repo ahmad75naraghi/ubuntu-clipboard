@@ -59,13 +59,28 @@ fi
 echo ""
 echo "🐍 نصب پکیج پایتون..."
 mkdir -p "$BIN_DIR" "$DESKTOP_DIR" "$AUTOSTART_DIR"
+# چک tk
+if ! python3 -c "import tkinter" 2>/dev/null; then
+  echo "  ⚠️ python3-tk نصب نیست — برای fallback لازم است"
+  MISSING_TK=1
+else
+  MISSING_TK=0
+fi
+if [[ $MISSING_TK -eq 1 ]]; then
+  echo "  تلاش برای نصب python3-tk ..."
+  sudo apt install -y python3-tk 2>/dev/null || echo "  ⚠️ نصب tk ناموفق — ادامه می‌دهیم (GTK اصلی استفاده می‌شود)"
+fi
 # سعی با pipx یا venv یا --user
 if command -v pipx &>/dev/null; then
   pipx install "$REPO_DIR" --force  || pip install --user "$REPO_DIR"
 else
-  # venv اختصاصی برای ایزوله بودن
+  # venv اختصاصی — حتما با --system-site-packages تا python3-gi دیده شود!
+  if [ -d "$VENV_DIR" ] && ! "$VENV_DIR/bin/python" -c "import gi" 2>/dev/null; then
+    echo "  ♻️  venv قدیمی بدون دسترسی به gi — بازسازی با --system-site-packages ..."
+    rm -rf "$VENV_DIR"
+  fi
   if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
+    python3 -m venv --system-site-packages "$VENV_DIR" || python3 -m venv "$VENV_DIR"
   fi
   "$VENV_DIR/bin/pip" install --upgrade pip
   "$VENV_DIR/bin/pip" install "$REPO_DIR"
@@ -79,7 +94,14 @@ EOF
 exec "$VENV_DIR/bin/ubuntu-clipboard-daemon" "\$@"
 EOF
   chmod +x "$BIN_DIR/ubuntu-clipboard" "$BIN_DIR/ubuntu-clipboard-daemon"
-  echo "  ✓ نصب در venv: $VENV_DIR"
+  echo "  ✓ نصب در venv: $VENV_DIR (system-site-packages)"
+  # تست gi داخل venv
+  if ! "$VENV_DIR/bin/python" -c "import gi; gi.require_version('Gtk','4.0')" 2>/dev/null; then
+    echo "  ⚠️  هشدار: gi داخل venv دیده نمی‌شود!"
+    echo "     سعی کنید: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1"
+  else
+    echo "  ✓ GTK داخل venv تایید شد"
+  fi
 fi
 
 # اطمینان از PATH

@@ -177,6 +177,13 @@ if _HAS_GTK:
 # ─── TK fallback ───
 def main_tk():
     _print_banner()
+    # check tk availability first
+    try:
+        import tkinter  # noqa: F401
+        has_tk = True
+    except ImportError:
+        has_tk = False
+
     from .ui.window import ClipboardWindow
     history = HistoryManager()
     try:
@@ -185,13 +192,45 @@ def main_tk():
         pass
     daemon = ClipboardDaemon(history=history)
     daemon.start(use_gtk=False)
-    print("  حالت Tkinter fallback — GTK4 در دسترس نیست.")
-    print("  برای تجربه کامل: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1")
-    print(f"  DB: {history.db_path}\n  پنجره را ببندید برای خروج.\n")
+
+    if not has_tk and not _HAS_GTK:
+        print("  ✗ هیچ GUI toolkit موجود نیست (نه GTK4 نه tkinter)")
+        print("  → فقط دیمن در پس‌زمینه اجرا شد (کپی‌ها ذخیره می‌شوند)")
+        print("  نصب: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-tk -y")
+        print(f"  DB: {history.db_path}")
+        print("  برای دیدن تاریخچه: ubuntu-clipboard --status")
+        print("  برای خروج: pkill -f ubuntu-clipboard")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            daemon.stop()
+        return
+
+    if not _HAS_GTK:
+        print("  حالت Tkinter fallback — GTK4 در دسترس نیست.")
+        print("  برای تجربه کامل: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1")
+    print(f"  DB: {history.db_path}\n  پنجره را ببندید برای خروج.\\n")
     w = ClipboardWindow(history=history)
-    w._ensure()
-    w._refresh()
-    w._root.mainloop()
+    try:
+        w._ensure()
+        # guard: if tk missing, _ensure does nothing and _root stays None
+        if getattr(w, "_root", None) is not None:
+            w._refresh()
+            w._root.mainloop()
+        else:
+            print("  GUI در دسترس نیست — دیمن فعال است")
+            import time
+            while True:
+                time.sleep(1)
+    except Exception as e:
+        print(f"  خطا در اجرای پنجره: {e}")
+        print("  دیمن همچنان فعال است — تاریخچه ذخیره می‌شود")
+        import time
+        try:
+            while True: time.sleep(1)
+        except KeyboardInterrupt: pass
     daemon.stop()
 
 def main():

@@ -21,7 +21,7 @@ else
     NEW="['$KEY_PATH']"
   else
     # remove trailing ] and append
-    NEW=$(echo "$CURRENT" | sed "s/]$/, '$KEY_PATH']/")
+    NEW=$(echo "$CURRENT" | sed "s|]$|, '$KEY_PATH']|")
   fi
   gsettings set $SCHEMA custom-keybindings "$NEW"
   echo "  ✓ لیست به‌روز شد: $NEW"

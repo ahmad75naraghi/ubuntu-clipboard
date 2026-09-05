@@ -484,12 +484,43 @@ else:
     # ─══════════════════════════════════════════
     # TKINTER FALLBACK (for CI / preview without GTK)
     # ═══════════════════════════════════════════
-    import tkinter as tk
-    from tkinter import ttk, messagebox
+    _HAS_TK = False
+    _TK_IMPORT_ERROR = None
+    try:
+        import tkinter as tk
+        from tkinter import ttk, messagebox
+        _HAS_TK = True
+    except ImportError as _e:
+        _HAS_TK = False
+        _TK_IMPORT_ERROR = _e
+        tk = None
+        messagebox = None
+        print(f"⚠️  tkinter نصب نیست: {_e}")
+        print("   نصب: sudo apt install python3-tk -y")
+        print("   یا:  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1  (پیشنهادی)")
+        try:
+            import subprocess, shutil
+            if shutil.which("notify-send"):
+                subprocess.run(["notify-send", "Ubuntu Clipboard", "tkinter نصب نیست\n sudo apt install python3-tk  یا  python3-gi"], timeout=2)
+            if shutil.which("zenity"):
+                subprocess.Popen(["zenity","--error","--text=tkinter نصب نیست\nsudo apt install python3-tk\nیا python3-gi برای تجربه کامل","--title=Clipboard Error"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     class ClipboardWindow:
         """Fallback زیبا با Tkinter — استایل ویندوز 11"""
         def __init__(self, app=None, history: HistoryManager = None):
+            if not _HAS_TK:
+                from ..history import HistoryManager as _HM
+                self.history = history or _HM()
+                self.cfg = get_config()
+                self._query = ""
+                self._root = None
+                self._list_frame = None
+                self._search_var = None
+                print("✗ GUI toolkit موجود نیست — تنها دیمن فعال است")
+                print("  sudo apt install python3-tk python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 -y")
+                return
             self.history = history or HistoryManager()
             self.cfg = get_config()
             self._query = ""
@@ -498,6 +529,14 @@ else:
             self._search_var = None
 
         def _ensure(self):
+            if not _HAS_TK:
+                print("✗ tkinter موجود نیست — نمی‌توان پنجره را باز کرد")
+                try:
+                    import subprocess, shutil
+                    if shutil.which("notify-send"):
+                        subprocess.run(["notify-send","Clipboard","GUI toolkit موجود نیست — sudo apt install python3-tk"], timeout=2)
+                except Exception: pass
+                return
             if self._root and self._root.winfo_exists():
                 return
             self._root = tk.Tk()
