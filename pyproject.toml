@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ubuntu-clipboard"
+version = "1.0.0"
+description = "کلیپ‌بورد حرفه‌ای اوبونتو — شبیه ویندوز 11 با Win+V | Windows-like Clipboard for Ubuntu"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name="Ubuntu Clipboard"}]
+keywords = ["clipboard", "ubuntu", "gnome", "wayland", "gtk", "win+v"]
+classifiers = [
+  "Environment :: X11 Applications :: GTK",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Desktop Environment :: Gnome",
+]
+dependencies = [
+  "Pillow>=10.0",
+  "pystray>=0.19",
+]
+
+[project.optional-dependencies]
+dev = ["pygobject", "pycairo"]
+
+[project.scripts]
+ubuntu-clipboard = "ubuntu_clipboard.app:main"
+ubuntu-clipboard-daemon = "ubuntu_clipboard.daemon:main"
+
+[project.urls]
+Repository = "https://github.com/ahmad75naraghi/ubuntu-clipboard"
+
+[tool.setuptools.packages.find]
+include = ["ubuntu_clipboard*"]
+
+[tool.setuptools.package-data]
+ubuntu_clipboard = ["ui/styles.css", "assets/*.png", "assets/*.jpg"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__"]

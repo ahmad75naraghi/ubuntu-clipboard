@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Clipboard Daemon
+Name[fa]=سرویس کلیپ‌بورد
+Comment=Clipboard history daemon (Win+V history)
+Comment[fa]=سرویس تاریخچه کلیپ‌بورد
+Exec=ubuntu-clipboard --daemon
+Icon=ubuntu-clipboard
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+StartupNotify=false
+Hidden=false
