@@ -48,7 +48,7 @@ fi
 
 # تنظیم مقادیر کلید سفارشی — از مسیر کامل استفاده می‌کنیم تا در Wayland هم کار کند
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" name 'Clipboard — Win+V'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" command "\"$BIN\" --toggle"
+gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" command "$BIN --toggle"
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super>v'
 
 echo "✓ میانبر Win+V ثبت شد!"

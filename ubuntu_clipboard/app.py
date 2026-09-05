@@ -270,6 +270,8 @@ def main():
     parser.add_argument("--settings", action="store_true", help="باز کردن تنظیمات")
     parser.add_argument("--status", action="store_true", help="نمایش وضعیت و دیباگ")
     parser.add_argument("--debug", action="store_true", help="حالت دیباگ با لاگ")
+    parser.add_argument("--no-tray", action="store_true", help="بدون آیکون تسک‌بار (جلوگیری از چشمک)")
+    parser.add_argument("--with-tray", action="store_true", help="با آیکون تسک‌بار")
     parser.add_argument("-h","--help", action="store_true")
     args, _ = parser.parse_known_args()
 
@@ -284,7 +286,8 @@ def main():
     if args.help:
         print("Ubuntu Clipboard — Win+V  v1.0.0\n")
         print("  ubuntu-clipboard              اجرای عادی (پنجره باز می‌شود)")
-        print("  ubuntu-clipboard --hidden     اجرای مخفی در پس‌زمینه (برای Autostart + آیکون تسک‌بار)")
+        print("  ubuntu-clipboard --hidden     اجرای مخفی در پس‌زمینه (برای Autostart)")
+        print("  ubuntu-clipboard --hidden --with-tray  با آیکون تسک‌بار (Top Bar)")
         print("  ubuntu-clipboard --toggle     تغییر نمایش پنجره (برای میانبر Win+V)")
         print("  ubuntu-clipboard --settings   باز کردن تنظیمات")
         print("  ubuntu-clipboard --status     نمایش وضعیت، تعداد آیتم‌ها و لاگ")
@@ -293,7 +296,7 @@ def main():
         print("")
         print("  نکات عیب‌یابی:")
         print("    • بعد از نصب یک بار لاگ‌اوت/لاگین کنید تا autostart فعال شود")
-        print("    • آیکون کلیپ‌بورد در Top Bar (کنار ساعت/وای‌فای) را بزنید برای باز کردن")
+        print("    • اگر چشمک دیدید: ubuntu-clipboard --hidden --no-tray")
         print("    • اگر Win+V کار نکرد: ./scripts/setup-shortcut.sh را دوباره بزنید")
         print("")
         return

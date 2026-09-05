@@ -37,6 +37,7 @@ class Config:
     image_max_preview: int = 512
     enable_sound: bool = False
     language: str = "fa"
+    enable_tray: bool = False  # پیش‌فرض خاموش تا چشمک نزند — با --with-tray روشن می‌شود
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)

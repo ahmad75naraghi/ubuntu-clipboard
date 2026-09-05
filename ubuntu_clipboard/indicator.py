@@ -43,16 +43,20 @@ class TrayIndicator:
 
     def setup(self):
         """ساخت آیکون — بهترین backend موجود را انتخاب کن"""
-        # --no-tray flag: disable tray for debugging
         import sys
+        # به صورت پیش‌فرض tray خاموش است تا چشمک نزند — فقط با --with-tray یا config enable_tray روشن می‌شود
+        from .config import get_config
+        cfg = get_config()
+        wants_tray = ("--with-tray" in sys.argv) or cfg.enable_tray
         if "--no-tray" in sys.argv:
-            print("  (tray disabled via --no-tray)")
+            wants_tray = False
+        if not wants_tray:
+            # print("  (tray غیرفعال — برای فعال‌سازی: ubuntu-clipboard --hidden --with-tray یا در تنظیمات)")
             return False
         # اگر GTK4 قبلاً لود شده، Ayatana (GTK3) را نمی‌توان همان پروسه لود کرد — تداخل نسخه
         # راه حل: فرآیند مستقل GTK3 اسپاون کن
         try:
             import gi
-            # get_required_version برمی‌گرداند یا None
             try:
                 ver = gi.get_required_version("Gtk")
             except Exception:
