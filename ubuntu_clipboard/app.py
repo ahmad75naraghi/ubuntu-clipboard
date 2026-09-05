@@ -104,6 +104,7 @@ def _handle_toggle_lock() -> bool:
                     (LOCK_DIR / "toggle.debounce").write_text(str(time.time()))
                 except Exception:
                     pass
+                if _HAS_LOG: log_toggle("KILLED", f"killed pid={pid}")
                 return True
             except (ValueError, OSError):
                 # lock قدیمی یا پروسه مرده — پاک کن
@@ -331,6 +332,11 @@ def main_tk(show_settings=False):
         daemon.stop()
 
 def main():
+    try:
+        from .log import log as _log0
+        _log0(f"MAIN START argv={sys.argv} pid={os.getpid()} cwd={os.getcwd()}", "MAIN")
+    except Exception:
+        pass
     parser = argparse.ArgumentParser(description="Ubuntu Clipboard — Win+V", add_help=False)
     parser.add_argument("--hidden", action="store_true", help="شروع مخفی (فقط دیمن)")
     parser.add_argument("--daemon", action="store_true", help="فقط دیمن بدون UI")

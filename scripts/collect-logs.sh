@@ -23,8 +23,15 @@ cat ~/.cache/ubuntu-clipboard/toggle.debounce 2>&1 || echo "no debounce"
 echo ""
 echo "===== gsettings ====="
 gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings 2>&1 | head -n 5
+gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/ name 2>&1
 gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/ command 2>&1
 gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/ binding 2>&1
+echo "-- custom0 --"
+gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ name 2>&1; gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ command 2>&1; gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding 2>&1
+echo "-- custom1 --"
+gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ name 2>&1; gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ command 2>&1; gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ binding 2>&1
+echo "===== journal media-keys last 30 ===="
+journalctl --user -u gsd-media-keys 2>&1 | tail -n 30 || journalctl --user 2>&1 | grep -i "media-keys\|grab accelerator" | tail -n 30
 echo ""
 echo "===== autostart ====="
 ls -l ~/.config/autostart/ubuntu-clipboard*.desktop 2>&1

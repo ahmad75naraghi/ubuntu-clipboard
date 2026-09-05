@@ -49,7 +49,19 @@ fi
 # تنظیم مقادیر کلید سفارشی — از مسیر کامل استفاده می‌کنیم تا در Wayland هم کار کند
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" name 'Clipboard — Win+V'
 gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" command "$BIN --toggle"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super>v'
+# بررسی تداخل Super+v — اگر custom0/1 هم Super+v دارد، هشدار و فیکس
+CONFLICT=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/ binding 2>/dev/null || echo "")
+CONFLICT2=$(gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/ binding 2>/dev/null || echo "")
+if [[ "$CONFLICT" == *"<Super>v"* || "$CONFLICT2" == *"<Super>v"* ]]; then
+  echo "  ⚠️  هشدار: Super+v قبلا توسط custom0/1 گرفته شده — میانبر جایگزین Super+Shift+v هم اضافه می‌شود"
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super><Shift>v'
+  # try original anyway, but fallback is shift
+else
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$KEY_PATH" binding '<Super>v'
+fi
+# نمایش وضعیت grab
+sleep 0.5
+journalctl --user --since "10 seconds ago" 2>&1 | grep -i "grab accelerator" | head -n 5 || true
 
 echo "✓ میانبر Win+V ثبت شد!"
 echo "  Command: ubuntu-clipboard --toggle"
