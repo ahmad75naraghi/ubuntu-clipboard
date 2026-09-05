@@ -52,8 +52,19 @@ def _handle_toggle_lock() -> bool:
     """
     اگر پنجره قبلی باز است، آن را ببند و True برگردان (یعنی toggle off)
     در غیر این صورت False (باید پنجره جدید باز شود)
+    debounce 400ms برای جلوگیری از چشمک با نگه‌داشتن کلید
     """
+    # debounce: اگر همین الان toggle کردیم، نادیده بگیر
     try:
+        debounce_file = LOCK_DIR / "toggle.debounce"
+        import time
+        if debounce_file.exists():
+            try:
+                last = float(debounce_file.read_text().strip())
+                if time.time() - last < 0.6:
+                    return True  # نادیده بگیر، فرض کن بسته شد
+            except Exception:
+                pass
         LOCK_DIR.mkdir(parents=True, exist_ok=True)
         if LOCK_FILE.exists():
             try:
@@ -76,6 +87,10 @@ def _handle_toggle_lock() -> bool:
                     pass
                 try:
                     LOCK_FILE.unlink()
+                except Exception:
+                    pass
+                try:
+                    (LOCK_DIR / "toggle.debounce").write_text(str(time.time()))
                 except Exception:
                     pass
                 return True
@@ -197,7 +212,8 @@ if _HAS_GTK:
             app.quit()
         signal.signal(signal.SIGINT, sig_handler)
         try:
-            return app.run(sys.argv)
+            # Use clean argv to avoid GApplication Unknown option errors
+            return app.run([sys.argv[0]])
         finally:
             _clear_lock()
 
@@ -222,7 +238,7 @@ def main_tk(show_settings=False):
     # بررسی: آیا daemon جدا در حال اجراست؟
     import subprocess
     try:
-        r = subprocess.run(["pgrep", "-f", "ubuntu-clipboard-daemon"], capture_output=True, text=True, timeout=1)
+        r = subprocess.run(["pgrep", "-af", "ubuntu-clipboard"], capture_output=True, text=True, timeout=1)
         daemon_already = bool(r.stdout.strip())
     except Exception:
         daemon_already = False
@@ -388,7 +404,7 @@ def _print_status():
         print(f"  gsettings: {e}")
     try:
         import subprocess
-        ps = subprocess.run(["pgrep","-a","ubuntu-clipboard"], capture_output=True, text=True, timeout=2)
+        ps = subprocess.run(["pgrep","-af","ubuntu-clipboard"], capture_output=True, text=True, timeout=2)
         print(f"\n  Processes:\n    {ps.stdout.strip() or '(هیچ)'}")
     except Exception:
         pass
