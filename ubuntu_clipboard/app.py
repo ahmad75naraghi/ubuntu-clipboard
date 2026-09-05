@@ -85,7 +85,7 @@ if _HAS_GTK:
                 self.daemon.start()
             except Exception as e:
                 print(f"daemon start failed: {e}")
-            # ── tray icon in top bar ──
+            # ── tray icon in top bar ── (standalone GTK3 process to avoid GTK4/GTK3 conflict)
             try:
                 from .indicator import TrayIndicator
                 self.tray = TrayIndicator(self)
@@ -95,6 +95,23 @@ if _HAS_GTK:
             except Exception as e:
                 print(f"tray setup failed: {e}")
                 self.tray = None
+
+        def do_shutdown(self):
+            # kill standalone tray if we spawned it
+            try:
+                import subprocess
+                subprocess.run(["pkill", "-f", "ubuntu_clipboard.tray"], timeout=2)
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "daemon"):
+                    self.daemon.stop()
+            except Exception:
+                pass
+            if _HAS_ADW:
+                Adw.Application.do_shutdown(self)
+            else:
+                Gtk.Application.do_shutdown(self)
 
         def do_activate(self):
             # Called on first launch — only first time we create/hold window

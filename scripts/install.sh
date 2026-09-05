@@ -48,7 +48,7 @@ if [ ${#MISSING[@]} -ne 0 ]; then
       sudo apt install -y gir1.2-appindicator3-0.1  || true
       sudo apt install -y wtype  || echo "  ⚠️ wtype نصب نشد (اختیاری برای Wayland)"
       # فعال‌سازی افزونه AppIndicator برای دیدن آیکون در Top Bar
-      gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || gnome-extensions enable appindicator@rgcjonas.gmail.com 2>/dev/null || true
+      gnome-extensions enable ubuntu-appindicators@ubuntu.com 2>/dev/null || gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || gnome-extensions enable appindicator@rgcjonas.gmail.com 2>/dev/null || true
     fi
   fi
 else
@@ -157,7 +157,7 @@ echo ""
 echo "  آیکون تسک‌بار: در Top Bar کنار ساعت/وای‌فای ببینید — کلیک = باز شدن کلیپ‌بورد"
 echo "  اگر آیکون را نمی‌بینید:"
 echo "    sudo apt install gnome-shell-extension-appindicator"
-echo "    gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com"
+echo "    gnome-extensions enable ubuntu-appindicators@ubuntu.com"
 echo "    سپس لاگ‌اوت/لاگین کنید"
 echo ""
 # اجرا — همیشه با لاگ

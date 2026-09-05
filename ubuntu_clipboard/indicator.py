@@ -48,7 +48,20 @@ class TrayIndicator:
         if "--no-tray" in sys.argv:
             print("  (tray disabled via --no-tray)")
             return False
-        # 1) Ayatana is native for Ubuntu GNOME — no flicker
+        # اگر GTK4 قبلاً لود شده، Ayatana (GTK3) را نمی‌توان همان پروسه لود کرد — تداخل نسخه
+        # راه حل: فرآیند مستقل GTK3 اسپاون کن
+        try:
+            import gi
+            # get_required_version برمی‌گرداند یا None
+            try:
+                ver = gi.get_required_version("Gtk")
+            except Exception:
+                ver = None
+            if ver == "4.0":
+                return self._spawn_standalone()
+        except Exception:
+            pass
+        # 1) Ayatana is native for Ubuntu GNOME — no flicker (when not in GTK4 process)
         if self._try_ayatana():
             return True
         # 2) AppIndicator fallback
@@ -57,8 +70,7 @@ class TrayIndicator:
         # 3) StatusIcon
         if self._try_status_icon():
             return True
-        # 4) pystray last resort — can cause Unknown window flicker on Wayland, so only if explicitly wanted
-        # Enable with --with-pystray or env UBUNTU_CLIPBOARD_USE_PYSTRAY=1
+        # 4) pystray last resort
         import os
         if "--with-pystray" in sys.argv or os.environ.get("UBUNTU_CLIPBOARD_USE_PYSTRAY") == "1":
             if self._try_pystray():
@@ -66,6 +78,31 @@ class TrayIndicator:
 
         print("⚠️  هیچ backend برای سینی سیستم پیدا نشد — افزونه Top Bar را نصب کنید: sudo apt install gir1.2-ayatanaappindicator3-0.1 gnome-shell-extension-appindicator")
         return False
+
+    def _spawn_standalone(self) -> bool:
+        """اسپاون فرآیند مستقل tray با GTK3 تا تداخل GTK4/GTK3 پیش نیاید"""
+        try:
+            import subprocess
+            import sys
+            # check if already running
+            try:
+                import subprocess as sp
+                r = sp.run(["pgrep", "-f", "ubuntu_clipboard.tray"], capture_output=True, text=True, timeout=1)
+                if r.stdout.strip():
+                    print("  tray already running")
+                    return True
+            except Exception:
+                pass
+            # spawn detached
+            cmd = [sys.executable, "-m", "ubuntu_clipboard.tray"]
+            # use Popen with setsid to detach
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            self._backend = "standalone"
+            print("✓ آیکون تسک‌بار (standalone GTK3) اسپاون شد — کنار ساعت ببینید")
+            return True
+        except Exception as e:
+            print(f"spawn standalone failed: {e}")
+            return False
 
     def _try_pystray(self) -> bool:
         try:
