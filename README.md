@@ -2,11 +2,11 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.5-blue)
+![Version](https://img.shields.io/badge/version-2.0.6-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-310%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-313%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -172,7 +172,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.5
+Ubuntu Clipboard 2.0.6
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -256,7 +256,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۱۰ تست
+└── test_*.py        # ۳۱۳ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -302,7 +302,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۱۰ تست
+make test        # ۳۱۳ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -428,7 +428,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 310 headless
+module outside `ui/` is importable without a display, which is what the 313 headless
 tests exercise.
 
 ```bash

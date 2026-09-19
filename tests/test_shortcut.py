@@ -446,8 +446,62 @@ def test_refresh_media_keys_falls_back_to_pkill():
         return subprocess.CompletedProcess(list(command), 0, b"", b"")
 
     message = shortcut.refresh_media_keys(runner=runner, which=lambda name: f"/usr/bin/{name}")
-    assert "gsd-media-keys" in message
-    assert [call[0] for call in calls] == ["systemctl", "pkill"]
+    assert message == "restarted gsd-media-keys"
+    assert [call[0] for call in calls][:2] == ["systemctl", "pkill"]
+    assert "pgrep" in [call[0] for call in calls]  # the restart is verified
+
+
+def test_refresh_media_keys_wakes_the_plugin_over_dbus():
+    """Ubuntu refuses the manual restart, so pkill is followed by a D-Bus call."""
+    import subprocess
+
+    calls: list[list[str]] = []
+    alive = {"value": False}
+
+    def runner(command, **_kwargs):
+        calls.append(list(command))
+        if command[0] == "systemctl":
+            return subprocess.CompletedProcess(list(command), 1, b"", b"may be requested by dependency only")
+        if command[0] == "pgrep":
+            return subprocess.CompletedProcess(list(command), 0 if alive["value"] else 1, b"", b"")
+        if command[0] == "gdbus":
+            alive["value"] = True
+        return subprocess.CompletedProcess(list(command), 0, b"", b"")
+
+    message = shortcut.refresh_media_keys(
+        runner=runner, which=lambda name: f"/usr/bin/{name}", sleep=lambda _seconds: None
+    )
+    assert message == "restarted gsd-media-keys"
+    assert "gdbus" in [call[0] for call in calls]
+
+
+def test_refresh_media_keys_warns_when_the_plugin_stays_down():
+    import subprocess
+
+    def runner(command, **_kwargs):
+        if command[0] in {"systemctl", "pgrep"}:
+            return subprocess.CompletedProcess(list(command), 1, b"", b"")
+        return subprocess.CompletedProcess(list(command), 0, b"", b"")
+
+    message = shortcut.refresh_media_keys(
+        runner=runner, which=lambda name: f"/usr/bin/{name}", sleep=lambda _seconds: None
+    )
+    assert message is not None and message.startswith("warning:")
+
+
+def test_the_binding_is_written_before_the_path_is_listed(fake_gsettings):
+    """The list write is what wakes gnome-settings-daemon, so it goes last."""
+    fake = fake_gsettings()
+    calls: list[list[str]] = []
+
+    def runner(command, **kwargs):
+        calls.append(list(command))
+        return fake(command, **kwargs)
+
+    install(runner=runner, reload_daemon=False)
+    writes = [call for call in calls if call[:2] == ["gsettings", "set"]]
+    assert writes[-1][2] == shortcut.SCHEMA  # ...media-keys custom-keybindings
+    assert {call[2] for call in writes[:-1]} == {f"{shortcut.CHILD_SCHEMA}:{shortcut.KEY_PATH}"}
 
 
 def test_refresh_media_keys_reports_failure_without_tools():

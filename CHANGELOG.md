@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] — 2026-09-19
+
+### Fixed
+
+- The keybinding is now written **before** its path is added to
+  `custom-keybindings`. `gnome-settings-daemon` reacts to the list change and
+  reads `name`/`command`/`binding` at that moment; writing the path first made
+  it see an empty binding, so `--status` reported a registered shortcut that
+  could never fire.
+- After restarting the plugin, the tool now waits for it to come back and asks
+  D-Bus to activate it if it does not; when it stays down the user is warned
+  ("log out and back in") instead of being told everything is reloaded.
+  Ubuntu 24.04 refuses `systemctl --user restart
+  org.gnome.SettingsDaemon.MediaKeys` ("may be requested by dependency only"),
+  which used to be the end of the story.
+
 ## [2.0.5] — 2026-09-19
 
 ### Added
@@ -161,6 +177,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.6]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.2...v2.0.3

@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,6 +58,19 @@ SET_TIMEOUT = 10.0
 
 #: The systemd user unit that owns the custom keybindings.
 MEDIA_KEYS_UNIT = "org.gnome.SettingsDaemon.MediaKeys"
+
+#: D-Bus is the way back: the unit is activatable but refuses manual starts.
+WAKE_MEDIA_KEYS = (
+    "gdbus",
+    "call",
+    "--session",
+    "--dest",
+    "org.gnome.SettingsDaemon.MediaKeys",
+    "--object-path",
+    "/org/gnome/SettingsDaemon/MediaKeys",
+    "--method",
+    "org.freedesktop.DBus.Peer.Ping",
+)
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -289,41 +303,66 @@ def media_keys_units() -> tuple[str, ...]:
 def refresh_media_keys(
     runner: Runner = subprocess.run,
     which: Callable[[str], str | None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> str | None:
     """Ask the shortcut daemon to reload, so the new key works immediately.
 
-    ``gnome-settings-daemon`` watches the keybinding list, but in practice a
-    freshly written binding is sometimes ignored until the plugin restarts;
-    restarting it avoids a log out. Returns what happened, or ``None``.
+    ``gnome-settings-daemon`` watches the keybinding list, but a freshly
+    written binding is regularly ignored until the plugin restarts. Ubuntu
+    refuses ``systemctl --user restart`` for this unit ("may be requested by
+    dependency only"), so the plugin is restarted by hand and then *verified*:
+    if it does not come back the caller is warned, instead of being told a
+    happy story while every keyboard shortcut sits dead.
     """
     finder = which or shutil.which
+    unit = media_keys_units()[0]
     if finder("systemctl"):
-        unit = media_keys_units()[0]
-        try:
-            result = runner(
-                ["systemctl", "--user", "restart", unit],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=SET_TIMEOUT,
-                check=False,
-            )
-            if result is not None and result.returncode == 0:
-                return f"reloaded {unit}"
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.debug("systemctl could not restart %s: %s", unit, exc)
-    if finder("pkill"):
-        try:
-            runner(
-                ["pkill", "-f", "gsd-media-keys"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=SET_TIMEOUT,
-                check=False,
-            )
-            return "restarted gsd-media-keys (the shell starts it again)"
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.debug("pkill failed: %s", exc)
-    return None
+        result = _run_quiet(runner, ["systemctl", "--user", "restart", unit])
+        if result is not None and result.returncode == 0:
+            return f"reloaded {unit}"
+    if not finder("pkill"):
+        return None
+    _run_quiet(runner, ["pkill", "-f", "gsd-media-keys"])
+    if _wait_for_media_keys(runner, sleep):
+        return "restarted gsd-media-keys"
+    if finder("gdbus"):
+        # A D-Bus call is the documented way back: the unit is D-Bus activated
+        # even though systemd refuses manual starts.
+        _run_quiet(runner, list(WAKE_MEDIA_KEYS))
+    if _wait_for_media_keys(runner, sleep):
+        return "restarted gsd-media-keys"
+    return "warning: gsd-media-keys was restarted but has not come back yet — log out and back in once"
+
+
+def _run_quiet(runner: Runner, command: Sequence[str]) -> subprocess.CompletedProcess | None:
+    """Run a best effort helper command, never raising."""
+    try:
+        return runner(
+            list(command),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=SET_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("%s failed: %s", command[0], exc)
+        return None
+
+
+def _media_keys_alive(runner: Runner) -> bool:
+    result = _run_quiet(runner, ["pgrep", "-f", "gsd-media-keys"])
+    return bool(result is not None and result.returncode == 0)
+
+
+def _wait_for_media_keys(
+    runner: Runner, sleep: Callable[[float], None], attempts: int = 8, pause: float = 0.5
+) -> bool:
+    """Wait for the plugin to be running again (it is D-Bus activated)."""
+    for _ in range(attempts):
+        if _media_keys_alive(runner):
+            return True
+        sleep(pause)
+    return False
 
 
 def remove_paths(paths: Sequence[str], runner: Runner = subprocess.run) -> list[str]:
@@ -391,6 +430,24 @@ def install(
     if not gsettings_available():
         raise ShortcutError("gsettings not found — this is not a GNOME session")
 
+    values = (
+        ("name", quote("Clipboard — Win+V")),
+        ("command", quote(report.command)),
+        ("binding", quote(binding)),
+    )
+    failures = [
+        f"{key} = {value} ({error})"
+        for key, value in values
+        if (error := set_value_checked(CHILD_SCHEMA, key, value, KEY_PATH, runner))
+    ]
+    if failures:
+        report.add("gsettings rejected " + "; ".join(failures))
+        return report
+
+    # The path goes into the list *last*: that write is the change notification
+    # gnome-settings-daemon listens to, and it reads binding/command right then.
+    # Listing the path first made the plugin see an empty binding and register
+    # nothing, which is how a "registered" shortcut could still do nothing.
     paths = parse_list(get_value(SCHEMA, KEY, runner=runner))
     # De-duplicate: drop other slots that already point at us.
     keep: list[str] = []
@@ -406,20 +463,6 @@ def install(
         if error:
             report.add(f"could not update {SCHEMA} {KEY}: {error}")
             return report
-
-    values = (
-        ("name", quote("Clipboard — Win+V")),
-        ("command", quote(report.command)),
-        ("binding", quote(binding)),
-    )
-    failures = [
-        f"{key} = {value} ({error})"
-        for key, value in values
-        if (error := set_value_checked(CHILD_SCHEMA, key, value, KEY_PATH, runner))
-    ]
-    if failures:
-        report.add("gsettings rejected " + "; ".join(failures))
-        return report
 
     for conflict in conflicts(binding, runner):
         if unbind_conflicts and _disable_shell_conflict(runner):
