@@ -90,6 +90,17 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEYS",
         help="with --install/--install-shortcut: use another key, e.g. '<Super><Alt>v'",
     )
+    setup.add_argument(
+        "--setup-paste",
+        dest="setup_paste",
+        action="store_true",
+        help="set up automatic pasting (installs ydotool and starts its daemon)",
+    )
+    setup.add_argument(
+        "--yes",
+        action="store_true",
+        help="with --setup-paste: do not ask before running the commands",
+    )
 
     diagnostics = parser.add_argument_group("diagnostics")
     diagnostics.add_argument("--status", action="store_true", help="print environment and installation state")
@@ -128,7 +139,7 @@ def _command_from_args(args: argparse.Namespace) -> str:
 ACTION_GROUPS: dict[str, tuple[str, ...]] = {
     "window": APP_COMMANDS,
     "history": ("list", "clear"),
-    "integration": ("install", "uninstall", "install_shortcut", "remove_shortcut"),
+    "integration": ("install", "uninstall", "install_shortcut", "remove_shortcut", "setup_paste"),
     "diagnostics": ("status", "logs", "clear_logs", "collect_logs", "diagnose"),
 }
 
@@ -158,6 +169,11 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         getattr(args, "install", False) or getattr(args, "install_shortcut", False)
     ):
         parser.error("--binding only makes sense with --install or --install-shortcut")
+    if getattr(args, "yes", False) and not getattr(args, "setup_paste", False):
+        parser.error("--yes only makes sense with --setup-paste")
+    others = ("install", "uninstall", "install_shortcut", "remove_shortcut")
+    if getattr(args, "setup_paste", False) and any(getattr(args, name, False) for name in others):
+        parser.error("--setup-paste cannot be combined with the other integration options")
 
 
 # ── local commands ─────────────────────────────────────────────────────────
@@ -366,6 +382,56 @@ def _first_word(command: str) -> str:
     return parts[0] if parts else ""
 
 
+def cmd_setup_paste(assume_yes: bool = False) -> int:
+    """Install and configure automatic pasting (GNOME/Wayland needs ydotool)."""
+    from .paste import paste_keys_for_status, run_setup, setup_steps, uinput_writable, ydotoold_unit_path
+
+    print(f"{APP_NAME} {__version__} — automatic paste setup")
+    print(f"  current state    {paste_keys_for_status()}")
+    steps = setup_steps()
+    if not steps:
+        print("  nothing to do — pasting already works.")
+        return EXIT_OK
+
+    print("\n  these commands will run:")
+    for step in steps:
+        prefix = "sudo " if step.sudo else ""
+        note = "  (optional)" if step.optional else ""
+        relocate = "  (needs a log out once)" if step.relogin else ""
+        print(f"    {prefix}{' '.join(step.command)}{note}{relocate}")
+        print(f"      {step.description}")
+    print(f"    write {ydotoold_unit_path()}")
+
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            print("\n  nothing was changed — run the same command with --yes to execute it.")
+            return EXIT_OK
+        try:
+            answer = input("\n  run them now? [y/N] ").strip().lower()
+        except EOFError:  # pragma: no cover - closed stdin
+            answer = ""
+        if answer not in {"y", "yes"}:
+            print("  nothing was changed.")
+            return EXIT_OK
+
+    results = run_setup()
+    print("")
+    for description, ok, optional in results:
+        mark = "✓" if ok else ("·" if optional else "✗")
+        print(f"  {mark} {description}")
+    print(f"\n  state            {paste_keys_for_status()}")
+    failed = [description for description, ok, optional in results if not ok and not optional]
+    if failed:
+        print("  some steps failed — run them by hand from the list above.")
+        return EXIT_FAILURE
+    if not uinput_writable():
+        print("  /dev/uinput is not writable for this user yet: log out and back in once,")
+        print("  then Win+V copies an item and pastes it straight into the focused window.")
+    else:
+        print("  done — Win+V now copies an item and pastes it where you are typing.")
+    return EXIT_OK
+
+
 def cmd_diagnose(config: Config) -> int:
     """Answer "why does Win+V not open the window?" with a checklist."""
     from .app import gtk_available
@@ -381,6 +447,7 @@ def cmd_diagnose(config: Config) -> int:
 
     print(f"{APP_NAME} {__version__} — Win+V diagnosis")
     problems: list[str] = []
+    gsettings_missing = False
 
     # 1. is the application itself healthy?
     print("\n1. the application")
@@ -401,6 +468,7 @@ def cmd_diagnose(config: Config) -> int:
     # 2. is the keybinding registered?
     print("\n2. the keybinding (org.gnome.settings-daemon.plugins.media-keys)")
     if not gsettings_available():
+        gsettings_missing = True
         print("   gsettings              not found — this is not a GNOME session")
         problems.append("gsettings is unavailable, so no shortcut can be registered")
         wanted = config.shortcut or DEFAULT_BINDING
@@ -466,6 +534,26 @@ def cmd_diagnose(config: Config) -> int:
         for line in daemon_log(8):
             print(f"   log                    {line}")
 
+    # 5. can a chosen item actually reach the focused window?
+    section = "3" if gsettings_missing else "5"
+    from .clipboard import detect_session
+    from .paste import paste_keys_for_status, paste_tools, uinput_writable, usable_tools, ydotoold_running
+
+    session = detect_session()
+    print(f"\n{section}. pasting into the focused window")
+    print(f"   session                {session}")
+    print(f"   helpers installed      {', '.join(paste_tools()) or 'none'}")
+    print(f"   helpers that can paste {', '.join(usable_tools()) or 'none'}")
+    if "ydotool" in paste_tools():
+        print(f"   ydotoold running       {'yes' if ydotoold_running() else 'no'}")
+        print(f"   /dev/uinput writable   {'yes' if uinput_writable() else 'no — add the user to input'}")
+    print(f"   verdict                {paste_keys_for_status()}")
+    if not usable_tools():
+        problems.append(
+            "automatic pasting is not available: the clipboard gets the item, but you must "
+            "press Ctrl+V — run --setup-paste to fix that"
+        )
+
     print("\nsummary")
     if not problems:
         print("   everything checks out — press Win+V. If nothing appears, the key is")
@@ -478,6 +566,7 @@ def cmd_diagnose(config: Config) -> int:
         print("     pgrep -a gsd-media-keys   # dead? the tool restarts it on the next install")
         print("     systemctl --user reset-failed org.gnome.SettingsDaemon.MediaKeys")
         print("     ubuntu-clipboard --install-shortcut --binding '<Super><Alt>v'")
+        print("     ubuntu-clipboard --setup-paste    # automatic paste into the focused window")
     print("\nfull report for a bug report: ubuntu-clipboard --collect-logs")
     return EXIT_OK
 
@@ -554,6 +643,8 @@ def _main(argv: list[str] | None = None) -> int:
             take_binding=args.take_binding,
             binding=args.binding or config.shortcut,
         )
+    if args.setup_paste:
+        return cmd_setup_paste(assume_yes=args.yes)
     if args.install:
         return cmd_install(args, config)
     if args.uninstall:

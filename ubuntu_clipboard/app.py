@@ -28,7 +28,7 @@ from . import APP_ICON, APP_ID, APP_NAME, __version__
 from .config import Config, config_path, get_config
 from .i18n import is_rtl, set_language, t
 from .models import ClipboardItem, ContentType
-from .paste import activate_window, active_window, send_paste
+from .paste import activate_window, active_window, paste_hint, send_paste
 from .storage import HistoryStore
 
 log = logging.getLogger(__name__)
@@ -292,9 +292,14 @@ if HAS_GTK:
             if self._previous_window:
                 activate_window(self._previous_window)
                 self._previous_window = None
-            succeeded, _tool = send_paste()
+            succeeded, tool = send_paste()
             if not succeeded:
-                self.notify(t("notify.copied"))
+                # Be specific: the item *is* on the clipboard, but the user has
+                # to press Ctrl+V until automatic pasting is set up.
+                self.notify(t(paste_hint()))
+                log.info("automatic paste unavailable — see --setup-paste")
+            else:
+                log.debug("pasted with %s", tool)
 
         def clear_history(self) -> int:
             removed = self.store.clear()

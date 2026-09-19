@@ -2,11 +2,11 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.7-blue)
+![Version](https://img.shields.io/badge/version-2.1.0-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-312%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-328%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -163,6 +163,8 @@ ubuntu-clipboard [options]
 | `--binding KEYS` | همراه `--install` یا `--install-shortcut`: استفاده از کلید دیگر و
 ذخیرهٔ آن در تنظیمات |
 | `--diagnose` | بررسی گام‌به‌گام اینکه چرا Win+V پنجره را باز نمی‌کند |
+| `--setup-paste` | راه‌اندازی چسباندن خودکار (نصب ydotool و دیمن آن) |
+| `--yes` | همراه `--setup-paste`: بدون پرسیدن تأییدیه اجرا کن |
 | `--status` | وضعیت کامل محیط، دیتابیس، میان‌بر و سرویس |
 | `--logs [N]` | چاپ N خط آخر لاگ (پیش‌فرض ۲۰۰) |
 | `--clear-logs` | پاک کردن فایل‌های لاگ |
@@ -172,7 +174,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.7
+Ubuntu Clipboard 2.1.0
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -256,7 +258,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۱۲ تست
+└── test_*.py        # ۳۲۸ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -302,7 +304,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۱۲ تست
+make test        # ۳۲۸ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -340,7 +342,29 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 
 `--diagnose` همهٔ پیش‌نیازها را یکی‌یکی بررسی می‌کند: نصب بودن GTK 4، در حال اجرا بودن
 سرویس، ثبت بودن میانبر، وجود فایل فرمان، تداخل با میانبرهای دیگر یا میانبر پوستهٔ گنوم،
-و زنده بودن `gsd-media-keys`. در پایان فهرست مشکلات و سریع‌ترین راه‌حل‌ها را چاپ می‌کند.
+زنده بودن `gsd-media-keys` و وضعیت چسباندن خودکار. در پایان فهرست مشکلات و سریع‌ترین
+راه‌حل‌ها را چاپ می‌کند.
+
+### چسباندن خودکار (Paste) روی گنوم
+
+وقتی روی یک آیتم کلیک می‌کنید (یا Enter می‌زنید) آیتم در کلیپ‌بورد قرار می‌گیرد و پنجره
+بسته می‌شود. برای اینکه خودِ برنامه هم `Ctrl+V` را بفرستد، لینوکس به یک ابزار شبیه‌سازی
+کیبورد نیاز دارد؛ گنوم/وی‌لند به برنامه‌ها اجازهٔ فرستادن کلید نمی‌دهد، پس `ydotool`
+(که در سطح کرنل کار می‌کند) لازم است:
+
+```bash
+ubuntu-clipboard --setup-paste          # فهرست دستورها را نشان می‌دهد و می‌پرسد
+ubuntu-clipboard --setup-paste --yes    # بدون پرسیدن، همه را اجرا می‌کند
+```
+
+این دستور `ydotool`/`ydotoold` و `xdotool` را نصب می‌کند، سرویس کاربرِ `ydotoold` را
+می‌سازد و راه می‌اندازد و کاربر را به گروه `input` اضافه می‌کند. **یک‌بار logout/login
+لازم است** تا عضویت گروه فعال شود. بعد از آن Win+V آیتم را مستقیم در همان پنجره‌ای که
+مشغول تایپ هستید می‌چسباند.
+
+تا وقتی این کار انجام نشده، برنامه صادقانه اطلاع می‌دهد: آیتم کپی می‌شود و باید خودتان
+`Ctrl+V` بزنید. `--status` هم در خط `auto paste` وضعیت واقعی را نشان می‌دهد
+(مثلاً `yes via ydotool` یا `no — ... run --setup-paste`).
 
 اگر میانبر دیگری هم روی همان کلید باشد، `--install-shortcut` هشدار می‌دهد و مسیر و
 فرمان آن را چاپ می‌کند (آن میانبر را دست نمی‌زنیم چون مال شماست)؛ در
@@ -428,7 +452,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 312 headless
+module outside `ui/` is importable without a display, which is what the 328 headless
 tests exercise.
 
 ```bash

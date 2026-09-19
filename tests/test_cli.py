@@ -343,3 +343,48 @@ def test_diagnose_names_the_rival_shortcut_and_process(monkeypatch, capsys):
     assert "in the list" in out and "(ours)" in out
     assert "another clipboard manager is running: diodon" in out
     assert "registered <Super>v" in out
+
+
+def test_setup_paste_prints_the_plan_without_running_it(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.paste.setup_steps", lambda *a, **k: [])
+    assert cli.main(["--setup-paste"]) == cli.EXIT_OK
+    assert "nothing to do" in capsys.readouterr().out
+
+
+def test_setup_paste_lists_commands_and_waits_for_confirmation(monkeypatch, capsys):
+    from ubuntu_clipboard.paste import Step
+
+    steps = [Step("install ydotool", ("apt-get", "install", "-y", "ydotool"), sudo=True)]
+    monkeypatch.setattr("ubuntu_clipboard.paste.setup_steps", lambda *a, **k: steps)
+    monkeypatch.setattr("ubuntu_clipboard.paste.run_setup", lambda *a, **k: pytest.fail("must not run"))
+    monkeypatch.setattr("ubuntu_clipboard.cli.sys.stdin.isatty", lambda: False)
+    assert cli.main(["--setup-paste"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "sudo apt-get install -y ydotool" in out
+    assert "--yes" in out
+
+
+def test_setup_paste_runs_everything_with_yes(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "ubuntu_clipboard.paste.run_setup",
+        lambda *a, **k: [("install ydotool", True, False), ("start ydotoold", True, False)],
+    )
+    monkeypatch.setattr("ubuntu_clipboard.paste.uinput_writable", lambda: True)
+    assert cli.main(["--setup-paste", "--yes"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "✓ install ydotool" in out
+    assert "pastes it where you are typing" in out
+
+
+def test_setup_paste_fails_when_a_required_step_fails(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "ubuntu_clipboard.paste.run_setup", lambda *a, **k: [("install ydotool", False, False)]
+    )
+    assert cli.main(["--setup-paste", "--yes"]) == cli.EXIT_FAILURE
+    assert "some steps failed" in capsys.readouterr().out
+
+
+def test_yes_needs_setup_paste():
+    with pytest.raises(SystemExit) as info:
+        cli.main(["--yes"])
+    assert info.value.code == 2

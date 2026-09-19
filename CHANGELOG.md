@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-09-19
+
+### Added
+
+- `--setup-paste` (with `--yes`): sets up automatic pasting in one step —
+  installs `ydotool`/`ydotoold` (and `xdotool`), writes the missing
+  `ydotoold.service` user unit, starts it, and adds the user to the `input`
+  group (which needs one log out). `--diagnose` and `--status` now report the
+  real paste state instead of guessing from installed binaries.
+
+### Fixed
+
+- ydotool 0.1.x — the version Ubuntu 24.04 ships — takes key *names*
+  (`ydotool key ctrl+v`), while 1.x takes raw keycodes. The version is now
+  detected and the right syntax used, with the other one as a fallback; the
+  old command silently typed nothing on Ubuntu 24.04.
+- `xdotool` is no longer advertised as a working paste helper in a Wayland
+  session: XTEST only reaches X11/XWayland clients. `--status` prints
+  `no — xdotool installed but cannot reach the focused window (run
+  --setup-paste)` instead.
+- When automatic pasting is impossible, the notification now says so and
+  names the command that fixes it, instead of implying the paste happened.
+
 ## [2.0.7] — 2026-09-19
 
 ### Fixed
@@ -194,6 +217,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.1.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.7...v2.1.0
 [2.0.7]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.4...v2.0.5

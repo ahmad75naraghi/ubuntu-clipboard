@@ -77,6 +77,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fa": "در کلیپ‌بورد کپی شد — با Ctrl+V جای‌گذاری کنید",
         "en": "Copied to the clipboard — press Ctrl+V to paste",
     },
+    "notify.copied_manual": {
+        "fa": "در کلیپ‌بورد کپی شد — جای‌گذاری خودکار فعال نیست، با Ctrl+V بچسبانید "
+        "(برای فعال‌سازی: ubuntu-clipboard --setup-paste)",
+        "en": "Copied to the clipboard — automatic pasting is off, press Ctrl+V "
+        "(enable it with: ubuntu-clipboard --setup-paste)",
+    },
     "notify.history_cleared": {"fa": "تاریخچه پاک شد", "en": "Clipboard history cleared"},
     "notify.shortcut_installed": {"fa": "میانبر Win+V ثبت شد", "en": "Win+V shortcut installed"},
     # ── preferences ────────────────────────────────────────────────────────
