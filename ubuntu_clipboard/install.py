@@ -271,10 +271,17 @@ def install_all(
         try:
             result = install_shortcut(binding=shortcut_binding, launch_command=command)
             report.shortcut = result
-            if result.ok:
-                report.did(f"shortcut installed: {shortcut_binding}")
-            else:
-                report.warn("shortcut installation did not complete")
+            for message in result.messages:
+                if result.ok:
+                    report.did(message)
+                else:
+                    report.warn(message)
+            if not result.ok:
+                report.warn(
+                    "shortcut installation did not complete — run 'ubuntu-clipboard "
+                    "--install-shortcut' for the exact reason, or add it by hand in "
+                    "Settings → Keyboard → Custom Shortcuts"
+                )
         except ShortcutError as exc:
             report.warn(str(exc))
     return report

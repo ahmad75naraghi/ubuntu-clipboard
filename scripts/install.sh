@@ -138,13 +138,20 @@ say "registering the desktop entry, icon, autostart and the Win+V shortcut"
 # ── 4. start the service ───────────────────────────────────────────────────
 if [[ $START_NOW -eq 1 ]]; then
   "$VENV_DIR/bin/ubuntu-clipboard" --quit >/dev/null 2>&1 || true
-  nohup "$VENV_DIR/bin/ubuntu-clipboard" --background >/dev/null 2>&1 &
-  sleep 1
+  STARTUP_OUTPUT="$(mktemp)"
+  nohup "$VENV_DIR/bin/ubuntu-clipboard" --background >"$STARTUP_OUTPUT" 2>&1 &
+  sleep 2
   if "$VENV_DIR/bin/ubuntu-clipboard" --status | grep -q "instance *running"; then
     say "service started"
   else
-    warn "the service does not seem to be running — check 'ubuntu-clipboard --logs'"
+    warn "the service did not start"
+    if [[ -s "$STARTUP_OUTPUT" ]]; then
+      say "--- output of 'ubuntu-clipboard --background' ---"
+      tail -n 25 "$STARTUP_OUTPUT" | sed 's/^/  /'
+    fi
+    warn "more details: ubuntu-clipboard --logs 100 — or: ubuntu-clipboard --collect-logs"
   fi
+  rm -f "$STARTUP_OUTPUT"
 fi
 
 cat <<'EOF'

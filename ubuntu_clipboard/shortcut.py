@@ -33,6 +33,8 @@ SHELL_TOGGLE_KEY = "toggle-message-tray"
 
 #: Commands that mean "this binding belongs to us".
 OWNED_MARKERS = ("ubuntu-clipboard", "ubuntu_clipboard")
+#: ``gsettings`` is a session bus round trip; it can be slow on a loaded machine.
+SET_TIMEOUT = 10.0
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -94,6 +96,37 @@ def get_value(
     return result.stdout.decode("utf-8", errors="replace").strip()
 
 
+def set_value_checked(
+    schema: str,
+    key: str,
+    value: str,
+    path: str | None = None,
+    runner: Runner = subprocess.run,
+) -> str | None:
+    """Set a key; return ``None`` on success or a human readable reason."""
+    target = f"{schema}:{path}" if path else schema
+    try:
+        result = runner(
+            ["gsettings", "set", target, key, value],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=SET_TIMEOUT,
+            check=False,
+        )
+    except FileNotFoundError:
+        return "gsettings is not installed"
+    except subprocess.TimeoutExpired:
+        return f"gsettings did not answer within {SET_TIMEOUT:g}s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"gsettings could not be run: {exc}"
+    if result is None:  # a runner that reported the failure instead of raising
+        return "gsettings could not be run"
+    if result.returncode == 0:
+        return None
+    message = result.stderr.decode("utf-8", errors="replace").strip()
+    return message or f"gsettings exited with status {result.returncode}"
+
+
 def set_value(
     schema: str,
     key: str,
@@ -101,9 +134,7 @@ def set_value(
     path: str | None = None,
     runner: Runner = subprocess.run,
 ) -> bool:
-    target = f"{schema}:{path}" if path else schema
-    result = _run(["gsettings", "set", target, key, value], runner)
-    return result is not None and result.returncode == 0
+    return set_value_checked(schema, key, value, path, runner) is None
 
 
 def parse_list(raw: str | None) -> list[str]:
@@ -219,16 +250,24 @@ def install(
         keep.append(path)
     if KEY_PATH not in keep:
         keep.append(KEY_PATH)
-    if keep != paths and not set_value(SCHEMA, KEY, format_list(keep), runner=runner):
-        report.add("could not update the keybinding list")
-        return report
+    if keep != paths:
+        error = set_value_checked(SCHEMA, KEY, format_list(keep), runner=runner)
+        if error:
+            report.add(f"could not update {SCHEMA} {KEY}: {error}")
+            return report
 
-    ok = True
-    ok &= set_value(SCHEMA, "name", quote("Clipboard — Win+V"), KEY_PATH, runner)
-    ok &= set_value(SCHEMA, "command", quote(report.command), KEY_PATH, runner)
-    ok &= set_value(SCHEMA, "binding", quote(binding), KEY_PATH, runner)
-    if not ok:
-        report.add("gsettings rejected one of the shortcut values")
+    values = (
+        ("name", quote("Clipboard — Win+V")),
+        ("command", quote(report.command)),
+        ("binding", quote(binding)),
+    )
+    failures = [
+        f"{key} = {value} ({error})"
+        for key, value in values
+        if (error := set_value_checked(SCHEMA, key, value, KEY_PATH, runner))
+    ]
+    if failures:
+        report.add("gsettings rejected " + "; ".join(failures))
         return report
 
     for conflict in conflicts(binding, runner):

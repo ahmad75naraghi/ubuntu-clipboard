@@ -219,3 +219,39 @@ def test_report_records_messages():
     report = shortcut.Report()
     report.add("hello")
     assert report.messages == ["hello"]
+
+
+def test_install_shows_what_gsettings_said(fake_gsettings):
+    """The 2.0.0 installer only said "did not complete" — never why."""
+
+    class Refusing(type(fake_gsettings())):
+        def __call__(self, command, **kwargs):
+            if command[1] == "set" and command[3] == "binding":
+                import subprocess
+
+                return subprocess.CompletedProcess(list(command), 1, b"", b"No such schema")
+            return super().__call__(command, **kwargs)
+
+    report = install(runner=Refusing({}))
+    assert report.ok is False
+    assert any("No such schema" in message for message in report.messages)
+
+
+def test_set_value_checked_explains_why_it_failed():
+    import subprocess
+
+    def missing(*_args, **_kwargs):
+        raise FileNotFoundError("gsettings")
+
+    def slow(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("gsettings", 10)
+
+    def refusing(command, **_kwargs):
+        return subprocess.CompletedProcess(list(command), 1, b"", b"unknown keyword")
+
+    assert "not installed" in shortcut.set_value_checked("s", "k", "v", runner=missing)
+    assert "did not answer" in shortcut.set_value_checked("s", "k", "v", runner=slow)
+    assert "unknown keyword" in shortcut.set_value_checked("s", "k", "v", runner=refusing)
+    assert shortcut.set_value_checked("s", "k", "v", runner=lambda *_a, **_k: None) == (
+        "gsettings could not be run"
+    )

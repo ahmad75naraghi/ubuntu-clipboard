@@ -676,6 +676,8 @@ def _build_gdk() -> types.ModuleType:
 def _build_glib() -> types.ModuleType:
     module = types.ModuleType("gi.repository.GLib")
     module.Bytes = FakeBytes
+    # ``GApplication`` has no ``set_application_name``; the GLib global is real.
+    module.set_application_name = lambda name: object.__setattr__(module, "application_name", name)
     module.Variant = lambda *args: FakeObject()
     module.VariantType = lambda *args: FakeObject()
     module.Error = Exception
@@ -843,9 +845,6 @@ class _ApplicationBase:
         return 1
 
     def set_accels_for_action(self, *_args) -> None:
-        pass
-
-    def set_application_name(self, *_args) -> None:
         pass
 
     def send_notification(self, *args) -> None:

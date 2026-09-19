@@ -5,12 +5,18 @@ The GUI cannot be imported in CI (there is no display and PyGObject is not on
 PyPI in a usable form), so this script verifies the *API surface* instead:
 
 * every ``Gtk.Thing`` / ``Gdk.Thing`` / ``Adw.Thing`` name exists in the
-  PyGObject stubs, and
+  PyGObject stubs,
 * every attribute used on an object created with ``Gtk.ClassName(...)`` or
-  ``Adw.ClassName.new(...)`` exists on that class (inherited members included).
+  ``Adw.ClassName.new(...)`` exists on that class (inherited members included),
+* every namespace imported from ``gi.repository`` is pinned with
+  ``gi.require_version`` (otherwise PyGObject warns and may load GTK 3), and
+* every ``self.attribute`` used inside a class derived from a GTK/GDK/Adw class
+  exists on that class or its bases.
 
-It catches typos such as ``Gtk.AlertDialog`` on an older GTK or
-``Gdk.ToplevelState.ACTIVE`` (the real flag is ``FOCUSED``) before a user does.
+It catches typos such as ``Gtk.AlertDialog`` on an older GTK,
+``Gdk.ToplevelState.ACTIVE`` (the real flag is ``FOCUSED``) or
+``self.set_application_name(...)`` (``GApplication`` has no such method — the
+GLib function ``GLib.set_application_name`` is the real one) before a user does.
 
 Usage::
 
@@ -30,6 +36,11 @@ import re
 import sys
 
 MODULES = ("Gtk", "Gdk", "Gio", "GLib", "Adw", "Pango", "GObject", "GdkPixbuf")
+
+#: Namespaces that only ever have one version, so ``gi.require_version`` is not
+#: needed (PyGObject does not warn for them either).
+SINGLE_VERSION = frozenset({"GLib", "GObject", "Gio"})
+
 PACKAGE = "ubuntu_clipboard"
 
 
@@ -127,13 +138,22 @@ class Stubs:
 class Visitor(ast.NodeVisitor):
     """Collects ``variable -> (module, class)`` and checks attribute accesses."""
 
-    def __init__(self, stubs: Stubs, filename: pathlib.Path) -> None:
+    def __init__(self, stubs: Stubs, filename: pathlib.Path, project: ProjectModel | None = None) -> None:
         self.stubs = stubs
         self.filename = filename
         self.problems: list[str] = []
         self.types: dict[str, tuple[str, str]] = {}
+        self.project = project or ProjectModel(ast.Module(body=[], type_ignores=[]))
+        self.class_stack: list[str] = []
 
     # -- scope handling ----------------------------------------------------
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802 - ast API
+        self.class_stack.append(node.name)
+        saved = dict(self.types)
+        self.generic_visit(node)
+        self.types = saved
+        self.class_stack.pop()
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802 - ast API
         saved = dict(self.types)
         self.generic_visit(node)
@@ -141,6 +161,23 @@ class Visitor(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node) -> None:  # noqa: N802 - ast API
         self.visit_FunctionDef(node)
+
+    def _check_self_attribute(self, node: ast.Attribute) -> None:
+        """``self.thing`` inside a project class must exist on it or its GTK bases."""
+        if not self.class_stack or node.attr.startswith("__"):
+            return
+        cls = self.class_stack[-1]
+        if node.attr in self.project.project_members(cls):
+            return
+        stub_bases = self.project.stub_bases(cls)
+        if not stub_bases:
+            return
+        if any(self.stubs.has_member(module, name, node.attr) for module, name in stub_bases):
+            return
+        described = ", ".join(f"{module}.{name}" for module, name in stub_bases)
+        self.problems.append(
+            f"{self.filename}:{node.lineno}: self.{node.attr} is not defined by {cls} nor by {described}"
+        )
 
     # -- assignments -------------------------------------------------------
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802 - ast API
@@ -183,6 +220,8 @@ class Visitor(ast.NodeVisitor):
 
     # -- attribute access --------------------------------------------------
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802 - ast API
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            self._check_self_attribute(node)
         key = None
         if isinstance(node.value, ast.Name):
             key = node.value.id
@@ -199,6 +238,124 @@ class Visitor(ast.NodeVisitor):
                     f"{self.filename}:{node.lineno}: {key} ({module}.{cls}) has no attribute {node.attr!r}"
                 )
         self.generic_visit(node)
+
+
+def check_require_version(files: list[pathlib.Path]) -> list[str]:
+    """Every ``from gi.repository import X`` needs a matching ``require_version``.
+
+    Without it PyGObject prints ``PyGIWarning`` and loads whichever version of
+    the namespace happens to be installed first (GTK 3 instead of GTK 4).
+    """
+    problems: list[str] = []
+    for filename in files:
+        tree = ast.parse(filename.read_text(encoding="utf-8"))
+        pinned: set[str] = set()
+        imports: list[tuple[int, str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "require_version"
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "gi"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                ):
+                    pinned.add(node.args[0].value)
+            elif isinstance(node, ast.ImportFrom) and node.module == "gi.repository":
+                imports.extend((node.lineno, alias.name) for alias in node.names)
+        for lineno, namespace in sorted(imports):
+            if namespace in SINGLE_VERSION or namespace in pinned:
+                continue
+            problems.append(
+                f'{filename}:{lineno}: {namespace} is imported without gi.require_version("{namespace}", ...)'
+            )
+    return problems
+
+
+class ProjectModel:
+    """Classes defined by the project, their bases and their members."""
+
+    def __init__(self, tree: ast.Module) -> None:
+        #: class name -> base expressions (as written)
+        self.bases: dict[str, list[ast.expr]] = {}
+        #: class name -> member names (methods, class attributes, ``self.x = ...``)
+        self.members: dict[str, set[str]] = {}
+        #: module level ``name = expression`` aliases (``A if cond else B``)
+        self.aliases: dict[str, ast.expr] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                self.bases[node.name] = list(node.bases)
+                members = self.members.setdefault(node.name, set())
+                for item in ast.walk(node):
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        members.add(item.name)
+                    elif isinstance(item, ast.Assign):
+                        for target in item.targets:
+                            if isinstance(target, ast.Name):
+                                members.add(target.id)
+                            elif (
+                                isinstance(target, ast.Attribute)
+                                and isinstance(target.value, ast.Name)
+                                and target.value.id == "self"
+                            ):
+                                members.add(target.attr)
+                    elif isinstance(item, ast.AnnAssign) and isinstance(
+                        item.target, (ast.Name, ast.Attribute)
+                    ):
+                        target = item.target
+                        if isinstance(target, ast.Name):
+                            members.add(target.id)
+                        elif isinstance(target.value, ast.Name) and target.value.id == "self":
+                            members.add(target.attr)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self.aliases[target.id] = node.value
+
+    def bases_of(self, name: str, seen: frozenset[str] = frozenset()) -> list[ast.expr]:
+        """Base expressions of a project class, aliases resolved."""
+        if name in seen:
+            return []
+        result: list[ast.expr] = []
+        for base in self.bases.get(name, []):
+            if isinstance(base, ast.Name) and base.id in self.aliases:
+                alias = self.aliases[base.id]
+                alternatives = [alias.body, alias.orelse] if isinstance(alias, ast.IfExp) else [alias]
+                for alternative in alternatives:
+                    if isinstance(alternative, ast.Name) and alternative.id in self.bases:
+                        result.extend(self.bases_of(alternative.id, seen | {name}))
+                    else:
+                        result.append(alternative)
+            elif isinstance(base, ast.Name) and base.id in self.bases:
+                result.extend(self.bases_of(base.id, seen | {name}))
+            else:
+                result.append(base)
+        return result
+
+    def project_members(self, name: str, seen: frozenset[str] = frozenset()) -> set[str]:
+        """Members defined by a project class and its project base classes."""
+        if name in seen:
+            return set()
+        found = set(self.members.get(name, set()))
+        for base in self.bases.get(name, []):
+            if isinstance(base, ast.Name) and base.id in self.bases:
+                found |= self.project_members(base.id, seen | {name})
+        return found
+
+    def stub_bases(self, name: str) -> list[tuple[str, str]]:
+        """(module, class) pairs from the stubs that this project class derives from."""
+        found: list[tuple[str, str]] = []
+        for base in self.bases_of(name):
+            if (
+                isinstance(base, ast.Attribute)
+                and isinstance(base.value, ast.Name)
+                and base.value.id in MODULES
+            ):
+                found.append((base.value.id, base.attr))
+        return found
 
 
 def check_names(stubs: Stubs, files: list[pathlib.Path]) -> list[str]:
@@ -241,10 +398,12 @@ def main(argv: list[str] | None = None) -> int:
         path = pathlib.Path(raw)
         files.extend(sorted(path.rglob("*.py")) if path.is_dir() else [path])
 
-    problems = check_names(stubs, files)
+    problems = check_require_version(files)
+    problems.extend(check_names(stubs, files))
     for filename in files:
-        visitor = Visitor(stubs, filename)
-        visitor.visit(ast.parse(filename.read_text(encoding="utf-8")))
+        tree = ast.parse(filename.read_text(encoding="utf-8"))
+        visitor = Visitor(stubs, filename, ProjectModel(tree))
+        visitor.visit(tree)
         problems.extend(visitor.problems)
 
     if args.verbose:

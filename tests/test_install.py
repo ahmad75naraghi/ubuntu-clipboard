@@ -155,3 +155,29 @@ def test_environment_report(isolated_home):
 def test_install_reports_a_missing_icon(isolated_home, monkeypatch):
     monkeypatch.setattr("ubuntu_clipboard.install.icon_source", lambda: pathlib.Path("/nonexistent/icon.png"))
     assert install.install_icon() is None
+
+
+def test_install_surfaces_shortcut_failures(isolated_home, monkeypatch):
+    from ubuntu_clipboard.shortcut import Report as ShortcutReport
+
+    broken = ShortcutReport(ok=False)
+    broken.add("gsettings rejected binding = '<Super>v' (No such schema)")
+
+    def failing(**_kwargs):
+        return broken
+
+    monkeypatch.setattr("ubuntu_clipboard.install.install_shortcut", failing)
+    report = install.install_all()
+    assert any("No such schema" in warning for warning in report.warnings)
+    assert any("--install-shortcut" in warning for warning in report.warnings)
+
+
+def test_install_reports_a_missing_gsettings(isolated_home, monkeypatch):
+    from ubuntu_clipboard.shortcut import ShortcutError
+
+    def explode(**_kwargs):
+        raise ShortcutError("gsettings not found — this is not a GNOME session")
+
+    monkeypatch.setattr("ubuntu_clipboard.install.install_shortcut", explode)
+    report = install.install_all()
+    assert any("not a GNOME session" in warning for warning in report.warnings)

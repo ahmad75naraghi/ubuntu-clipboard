@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from ubuntu_clipboard import cli
+from ubuntu_clipboard import __version__, cli
 from ubuntu_clipboard.config import Config
 from ubuntu_clipboard.storage import HistoryStore
 
@@ -51,7 +51,7 @@ def test_version(capsys):
     assert cli.main(["--version"]) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert "Ubuntu Clipboard" in out
-    assert "2.0.0" in out
+    assert __version__ in out
 
 
 def test_status_works_without_gtk(monkeypatch, capsys):
@@ -240,3 +240,25 @@ def test_negative_log_count_is_clamped(capsys):
 def test_status_reports_clipboard_capabilities(capsys):
     assert cli.main(["--status"]) == cli.EXIT_OK
     assert "clipboard tools" in capsys.readouterr().out
+
+
+def test_status_says_when_the_shortcut_is_missing(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: True)
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.status",
+        lambda **_kwargs: {"registered_paths": [], "ours_listed": False, "binding": None, "command": None},
+    )
+    assert cli.main(["--status"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "--install-shortcut" in out
+
+
+def test_unexpected_errors_are_reported_not_raised(monkeypatch, capsys):
+    def explode(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "run_app", explode)
+    assert cli.main(["--toggle"]) == cli.EXIT_FAILURE
+    captured = capsys.readouterr()
+    assert "boom" in captured.err
+    assert "ubuntu-clipboard --logs" in captured.err

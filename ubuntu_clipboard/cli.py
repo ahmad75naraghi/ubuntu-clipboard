@@ -13,12 +13,13 @@ import argparse
 import logging
 import os
 import sys
+import traceback
 
 from . import APP_ID, APP_NAME, PROJECT_URL, __version__
 from .config import Config, config_path, get_config
 from .i18n import set_language, t
 from .log import clear as clear_logs
-from .log import setup_logging, tail
+from .log import log_path, setup_logging, tail
 from .storage import HistoryStore
 
 log = logging.getLogger(__name__)
@@ -213,7 +214,10 @@ def cmd_status(store: HistoryStore) -> int:
         shortcut_state = shortcut_status()
         binding = shortcut_state.get("binding") or "-"
         command = shortcut_state.get("command") or "-"
-        print(f"  shortcut         {binding} -> {command}")
+        if shortcut_state.get("ours_listed"):
+            print(f"  shortcut         {binding} -> {command}")
+        else:
+            print("  shortcut         not registered — ubuntu-clipboard --install-shortcut")
     else:
         print("  shortcut         gsettings unavailable")
     return EXIT_OK
@@ -279,8 +283,18 @@ def cmds_shortcut(install: bool) -> int:
     except ShortcutError as exc:
         print(f"  ! {exc}", file=sys.stderr)
         return EXIT_FAILURE
+    stream = sys.stdout if report.ok else sys.stderr
+    mark = "✓" if report.ok else "!"
     for message in report.messages:
-        print(f"  ✓ {message}")
+        print(f"  {mark} {message}", file=stream)
+    if not report.ok:
+        print(
+            "  ! gsettings refused the keybinding — set it up by hand instead:"
+            "\n    Settings → Keyboard → Custom Shortcuts"
+            f"\n    name: Clipboard, command: {report.command}, shortcut: {report.binding}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILURE
     return EXIT_OK
 
 
@@ -294,22 +308,44 @@ def run_app(command: str, debug: bool = False) -> int:
         return EXIT_FAILURE
     config = get_config()
     set_language(config.language)
-    application = ClipboardApplication(
-        config=config,
-        command=command,
-        debug=debug,
-        start_hidden=command in {"background", "none"},
-    )
     try:
+        application = ClipboardApplication(
+            config=config,
+            command=command,
+            debug=debug,
+            start_hidden=command in {"background", "none"},
+        )
         return application.run([sys.argv[0], f"--{command}"])
     except Exception as exc:  # pragma: no cover - display/bus problems
-        log.error("cannot start the application: %s", exc)
-        print(f"{APP_NAME}: {exc}", file=sys.stderr)
-        return EXIT_FAILURE
+        return _explain_failure(exc, debug)
+
+
+def _explain_failure(exc: Exception, debug: bool = False) -> int:
+    """Log an unexpected failure and tell the user where the details are."""
+    log.error("unexpected error: %s", exc)
+    log.debug("traceback:", exc_info=exc)
+    print(f"{APP_NAME}: {exc}", file=sys.stderr)
+    if debug:
+        traceback.print_exc()
+    else:
+        print(f"  full traceback in {log_path()} — run: ubuntu-clipboard --logs", file=sys.stderr)
+    return EXIT_FAILURE
 
 
 # ── entry point ────────────────────────────────────────────────────────────
 def main(argv: list[str] | None = None) -> int:
+    """Entry point of ``ubuntu-clipboard``; never raises."""
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:  # pragma: no cover - user pressed Ctrl+C
+        return EXIT_FAILURE
+    except Exception as exc:  # pragma: no cover - last resort
+        arguments = sys.argv[1:] if argv is None else list(argv)
+        setup_logging(console="--debug" in arguments)
+        return _explain_failure(exc, debug="--debug" in arguments)
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     validate_args(parser, args)

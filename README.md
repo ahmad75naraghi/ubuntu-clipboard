@@ -2,7 +2,7 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.1-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
@@ -167,7 +167,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.0
+Ubuntu Clipboard 2.0.1
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -334,6 +334,10 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 
 اگر میانبر دیگری روی `<Super>v` باشد، `--install-shortcut` آن را غیرفعال می‌کند و
 هشدار می‌دهد. ممکن است لازم باشد یک بار از حساب خارج و دوباره وارد شوید.
+
+اگر `--install-shortcut` ناموفق بود، خودِ پیام خطای `gsettings` چاپ می‌شود؛ در آن صورت
+میانبر را دستی بسازید: **Settings → Keyboard → Custom Shortcuts** با فرمان
+`ubuntu-clipboard --toggle` و کلید `<Super>v`.
 
 **پنجره باز می‌شود ولی Paste خودکار انجام نمی‌شود؟**
 

@@ -4,6 +4,35 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-09-19
+
+Fixes two crashes that only show up with a real PyGObject (the test doubles
+accepted both calls), found while installing 2.0.0 on Ubuntu 24.04.
+
+### Fixed
+
+- **`--background`, `--toggle` and friends died on startup** with
+  ``AttributeError: 'ClipboardApplication' object has no attribute
+  'set_application_name'``. `Gio.Application` has no such method; the GLib
+  global `GLib.set_application_name()` is the real API.
+- **`Gdk` was imported without a version pin**, so PyGObject printed
+  ``PyGIWarning`` and was free to pick GTK 3. `gi.require_version("Gdk", "4.0")`
+  is now set in `app.py` and `ui/__init__.py`.
+
+### Changed
+
+- `scripts/check_gtk_api.py` grew the two rules that would have caught the
+  above: every `gi.repository` import needs a `gi.require_version`, and every
+  `self.attribute` inside a class derived from Gtk/Gdk/Adw must exist on that
+  class. `tests/test_gtk_checker.py` keeps the rules honest.
+- A failed shortcut install now prints the reason from `gsettings` (including
+  its stderr) instead of "did not complete"; `--status` says
+  "not registered — ubuntu-clipboard --install-shortcut" instead of `- -> -`.
+- An unexpected error is written to the application log and reported as one
+  line (plus the log path); `--debug` still prints the full traceback.
+- `scripts/install.sh` shows the output of the background start when the
+  service does not come up, instead of only warning that it is not running.
+
 ## [2.0.0] — 2026-09-19
 
 A full rewrite. The user interface, the storage layer and the installer were replaced;
@@ -72,5 +101,6 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/releases/tag/v1.0.0

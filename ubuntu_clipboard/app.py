@@ -37,6 +37,7 @@ try:  # pragma: no cover - import guard
     import gi
 
     gi.require_version("Gtk", "4.0")
+    gi.require_version("Gdk", "4.0")
     from gi.repository import Gdk, Gio, GLib, Gtk
 
     HAS_GTK = True
@@ -103,7 +104,9 @@ if HAS_GTK:
             self._previous_window = None
             self._save_guard_until = 0.0
             self._reload_pending = False
-            self.set_application_name(APP_NAME)
+            # ``GApplication`` has no ``set_application_name``; the GLib global
+            # is what GTK itself calls during ``gtk_init``.
+            GLib.set_application_name(APP_NAME)
 
         # ── startup ────────────────────────────────────────────────────────
         def do_startup(self) -> None:  # noqa: N802 - GObject vfunc
