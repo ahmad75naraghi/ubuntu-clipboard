@@ -2,11 +2,11 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.1.0-blue)
+![Version](https://img.shields.io/badge/version-2.1.1-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-328%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-335%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -165,6 +165,8 @@ ubuntu-clipboard [options]
 | `--diagnose` | بررسی گام‌به‌گام اینکه چرا Win+V پنجره را باز نمی‌کند |
 | `--setup-paste` | راه‌اندازی چسباندن خودکار (نصب ydotool و دیمن آن) |
 | `--yes` | همراه `--setup-paste`: بدون پرسیدن تأییدیه اجرا کن |
+| `--test-paste` | بعد از چند ثانیه `Ctrl+V` می‌فرستد تا ببینی چسباندن کار می‌کند یا نه |
+| `--delay SECONDS` | همراه `--test-paste`: فاصلهٔ پیش‌فرض (۵ ثانیه) را عوض کن |
 | `--status` | وضعیت کامل محیط، دیتابیس، میان‌بر و سرویس |
 | `--logs [N]` | چاپ N خط آخر لاگ (پیش‌فرض ۲۰۰) |
 | `--clear-logs` | پاک کردن فایل‌های لاگ |
@@ -174,7 +176,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.1.0
+Ubuntu Clipboard 2.1.1
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -258,7 +260,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۲۸ تست
+└── test_*.py        # ۳۳۵ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -304,7 +306,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۲۸ تست
+make test        # ۳۳۵ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -361,6 +363,21 @@ ubuntu-clipboard --setup-paste --yes    # بدون پرسیدن، همه را ا
 می‌سازد و راه می‌اندازد و کاربر را به گروه `input` اضافه می‌کند. **یک‌بار logout/login
 لازم است** تا عضویت گروه فعال شود. بعد از آن Win+V آیتم را مستقیم در همان پنجره‌ای که
 مشغول تایپ هستید می‌چسباند.
+
+اگر نمی‌خواهی همین حالا logout کنی، این دو دستور موقتاً (تا ری‌استارت بعدی) مشکل را حل
+می‌کنند:
+
+```bash
+sudo chmod 666 /dev/uinput
+systemctl --user restart ydotoold
+ubuntu-clipboard --test-paste      # در ۵ ثانیهٔ آینده Ctrl+V می‌فرستد
+```
+
+`--test-paste` بعد از شمارش معکوس، همان میان‌بر چسباندن را می‌فرستد و می‌گوید کدام ابزار
+کار کرد؛ `--diagnose` هم اگر گروه `input` در نشست فعال نباشد همین را توضیح می‌دهد. دقت
+کن که `wtype` روی گنوم کار نمی‌کند (Mutter پروتکل کیبورد مجازی را ندارد) و `xdotool`
+هم فقط به پنجره‌های X11/XWayland می‌رسد — پس روی گنوم/وی‌لند تنها راه واقعی `ydotool`
+است.
 
 تا وقتی این کار انجام نشده، برنامه صادقانه اطلاع می‌دهد: آیتم کپی می‌شود و باید خودتان
 `Ctrl+V` بزنید. `--status` هم در خط `auto paste` وضعیت واقعی را نشان می‌دهد
@@ -452,7 +469,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 328 headless
+module outside `ui/` is importable without a display, which is what the 335 headless
 tests exercise.
 
 ```bash

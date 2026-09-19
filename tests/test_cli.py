@@ -388,3 +388,54 @@ def test_yes_needs_setup_paste():
     with pytest.raises(SystemExit) as info:
         cli.main(["--yes"])
     assert info.value.code == 2
+
+
+def test_test_paste_reports_the_helper(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.paste.usable_tools", lambda *a, **k: ["ydotool"])
+    monkeypatch.setattr("ubuntu_clipboard.paste.send_paste", lambda *a, **k: (True, "ydotool"))
+    monkeypatch.setattr("ubuntu_clipboard.cli._clipboard_preview", lambda: "hello")
+    assert cli.main(["--test-paste", "--delay", "0"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "clipboard now           hello" in out
+    assert "pressed Ctrl+V with ydotool" in out
+
+
+def test_test_paste_explains_a_failure(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.paste.usable_tools", lambda *a, **k: ["ydotool"])
+    monkeypatch.setattr("ubuntu_clipboard.paste.send_paste", lambda *a, **k: (False, None))
+    monkeypatch.setattr("ubuntu_clipboard.paste.paste_notes", lambda *a, **k: ["log out and back in once"])
+    assert cli.main(["--test-paste", "--delay", "0"]) == cli.EXIT_FAILURE
+    out = capsys.readouterr().out
+    assert "no helper could send the key" in out
+    assert "log out and back in once" in out
+
+
+def test_test_paste_without_helpers(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.paste.usable_tools", lambda *a, **k: [])
+    monkeypatch.setattr("ubuntu_clipboard.paste.paste_notes", lambda *a, **k: ["ydotool is not installed"])
+    assert cli.main(["--test-paste", "--delay", "0"]) == cli.EXIT_FAILURE
+    assert "ydotool is not installed" in capsys.readouterr().out
+
+
+def test_delay_needs_test_paste():
+    with pytest.raises(SystemExit) as info:
+        cli.main(["--delay", "3"])
+    assert info.value.code == 2
+
+
+def test_diagnose_prints_the_fix_for_the_input_group(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.cli.is_running", lambda: True)
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: False)
+    monkeypatch.setattr("ubuntu_clipboard.paste.usable_tools", lambda *a, **k: [])
+    monkeypatch.setattr("ubuntu_clipboard.paste.paste_tools", lambda *a, **k: ["ydotool"])
+    monkeypatch.setattr("ubuntu_clipboard.paste.uinput_writable", lambda *a: False)
+    monkeypatch.setattr("ubuntu_clipboard.paste.user_in_input_group", lambda *a: True)
+    monkeypatch.setattr("ubuntu_clipboard.paste.ydotoold_running", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "ubuntu_clipboard.paste.paste_notes",
+        lambda *a, **k: ["log out and back in once to apply it", "right now: sudo chmod 666 /dev/uinput"],
+    )
+    assert cli.main(["--diagnose"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "the input group is not active in this session" in out
+    assert "chmod 666 /dev/uinput" in out

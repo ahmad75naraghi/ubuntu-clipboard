@@ -216,3 +216,54 @@ def test_run_setup_reports_each_step(tmp_path, monkeypatch):
         ["systemctl", "--user", "enable"],
     ]
     assert (tmp_path / "ydotoold.service").exists()
+
+
+def test_wtype_is_tested_not_assumed():
+    """Mutter does not implement the virtual keyboard protocol: probe it."""
+
+    def runner(_command, **_kwargs):
+        return subprocess.CompletedProcess(
+            ["wtype", ""], 1, b"", b"Compositor does not support the virtual keyboard protocol"
+        )
+
+    assert paste.wtype_supported(which_for("wtype"), runner) is False
+
+    def working(_command, **_kwargs):
+        return subprocess.CompletedProcess(["wtype", ""], 0, b"", b"")
+
+    assert paste.wtype_supported(which_for("wtype"), working) is True
+    assert paste.wtype_supported(which_for(), working) is None
+
+
+def test_an_unusable_wtype_is_not_offered(monkeypatch):
+    monkeypatch.setattr(paste, "wtype_supported", lambda *_a, **_k: False)
+    assert paste.usable_tools(which_for("wtype"), {"XDG_SESSION_TYPE": "wayland"}) == []
+
+
+def test_a_stale_socket_does_not_mean_the_daemon_runs(tmp_path):
+    """ydotoold creates its socket *before* it opens /dev/uinput, so it survives a crash."""
+    (tmp_path / ".ydotool_socket").write_text("")
+
+    def runner(command, **_kwargs):
+        return subprocess.CompletedProcess(list(command), 1, b"", b"")
+
+    assert (
+        paste.ydotoold_running(which_for("ydotool", "pgrep"), runner, {"XDG_RUNTIME_DIR": str(tmp_path)})
+        is False
+    )
+
+
+def test_paste_notes_explain_the_input_group(monkeypatch):
+    monkeypatch.setattr(paste, "usable_tools", lambda *_a, **_k: [])
+    monkeypatch.setattr(paste, "uinput_writable", lambda *_a: False)
+    monkeypatch.setattr(paste, "user_in_input_group", lambda *_a: True)
+    notes = " | ".join(paste.paste_notes(which_for("ydotool")))
+    assert "log out and back in" in notes
+    assert "chmod 666 /dev/uinput" in notes
+    monkeypatch.setattr(paste, "user_in_input_group", lambda *_a: False)
+    assert "not in the input group" in " | ".join(paste.paste_notes(which_for("ydotool")))
+
+
+def test_paste_notes_are_empty_when_pasting_works(monkeypatch):
+    monkeypatch.setattr(paste, "usable_tools", lambda *_a, **_k: ["ydotool"])
+    assert paste.paste_notes() == []

@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] — 2026-09-19
+
+### Added
+
+- `--test-paste` (with `--delay SECONDS`): prints what is on the clipboard, counts
+  down, then sends the paste shortcut and says which helper did it — the honest
+  way to check pasting without the window.
+- `--diagnose` now distinguishes "not in the input group" from "in the group,
+  but this session predates it" and prints the exact fix, including the
+  no-log-out workaround (`sudo chmod 666 /dev/uinput` + restart `ydotoold`).
+
+### Fixed
+
+- `wtype` is no longer reported as a working paste helper. Mutter does not
+  implement the virtual keyboard protocol, so an installed wtype cannot type
+  anywhere on GNOME; it is probed (`wtype ""`) instead of trusted by name.
+- A stale `ydotool` socket no longer makes `ydotoold` look alive: the process
+  table is asked first, because the daemon creates the socket *before* it opens
+  `/dev/uinput` and a crashed daemon leaves the file behind.
+- `--setup-paste` said nothing when the group needed a log out; the same advice
+  as above is printed now.
+
 ## [2.1.0] — 2026-09-19
 
 ### Added
@@ -217,6 +239,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.1.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.7...v2.1.0
 [2.0.7]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.5...v2.0.6

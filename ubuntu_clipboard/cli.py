@@ -15,6 +15,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -116,6 +117,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="check why Win+V does not open the window and print what to do",
     )
+    diagnostics.add_argument(
+        "--test-paste",
+        dest="test_paste",
+        action="store_true",
+        help="press Ctrl+V in a few seconds so you can see whether pasting works",
+    )
+    diagnostics.add_argument(
+        "--delay",
+        type=float,
+        default=5.0,
+        metavar="SECONDS",
+        help="with --test-paste: how long to wait before pressing Ctrl+V (default 5)",
+    )
     diagnostics.add_argument("--debug", action="store_true", help="verbose logging on stderr")
 
     parser.add_argument(
@@ -140,7 +154,7 @@ ACTION_GROUPS: dict[str, tuple[str, ...]] = {
     "window": APP_COMMANDS,
     "history": ("list", "clear"),
     "integration": ("install", "uninstall", "install_shortcut", "remove_shortcut", "setup_paste"),
-    "diagnostics": ("status", "logs", "clear_logs", "collect_logs", "diagnose"),
+    "diagnostics": ("status", "logs", "clear_logs", "collect_logs", "diagnose", "test_paste"),
 }
 
 
@@ -171,6 +185,8 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--binding only makes sense with --install or --install-shortcut")
     if getattr(args, "yes", False) and not getattr(args, "setup_paste", False):
         parser.error("--yes only makes sense with --setup-paste")
+    if getattr(args, "delay", 5.0) != 5.0 and not getattr(args, "test_paste", False):
+        parser.error("--delay only makes sense with --test-paste")
     others = ("install", "uninstall", "install_shortcut", "remove_shortcut")
     if getattr(args, "setup_paste", False) and any(getattr(args, name, False) for name in others):
         parser.error("--setup-paste cannot be combined with the other integration options")
@@ -432,6 +448,54 @@ def cmd_setup_paste(assume_yes: bool = False) -> int:
     return EXIT_OK
 
 
+def _clipboard_preview(limit: int = 60) -> str:
+    """What is on the clipboard right now, so a paste test is not a surprise."""
+    import subprocess
+
+    for tool in (["wl-paste", "--no-newline"], ["xclip", "-selection", "clipboard", "-o"]):
+        try:
+            result = subprocess.run(
+                tool, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0 and result.stdout:
+            text = result.stdout.decode("utf-8", errors="replace").strip().replace("\n", " ⏎ ")
+            return text[:limit] + ("…" if len(text) > limit else "")
+    return ""
+
+
+def cmd_test_paste(delay: float = 5.0) -> int:
+    """Press Ctrl+V after a countdown — the honest way to check pasting."""
+    from .paste import paste_notes, send_paste, usable_tools
+
+    print(f"{APP_NAME} {__version__} — paste test")
+    tools = usable_tools()
+    print(f"  helpers that can paste  {', '.join(tools) or 'none'}")
+    preview = _clipboard_preview()
+    print(f"  clipboard now           {preview or '(empty or unreadable)'}")
+    if not tools:
+        for note in paste_notes():
+            print(f"  {note}")
+        return EXIT_FAILURE
+
+    seconds = max(0.0, delay)
+    print(f"\n  put the cursor in a text field — pressing Ctrl+V in {seconds:g} seconds…")
+    while seconds > 0:
+        print(f"    {seconds:g}", flush=True)
+        time.sleep(1.0 if seconds >= 1 else seconds)
+        seconds -= 1.0
+    ok, tool = send_paste()
+    if ok:
+        print(f"\n  ✓ pressed Ctrl+V with {tool}")
+        print("    if the text appeared where the cursor was, automatic pasting works.")
+        return EXIT_OK
+    print("\n  ✗ no helper could send the key — nothing was pasted.")
+    for note in paste_notes():
+        print(f"    {note}")
+    return EXIT_FAILURE
+
+
 def cmd_diagnose(config: Config) -> int:
     """Answer "why does Win+V not open the window?" with a checklist."""
     from .app import gtk_available
@@ -537,7 +601,15 @@ def cmd_diagnose(config: Config) -> int:
     # 5. can a chosen item actually reach the focused window?
     section = "3" if gsettings_missing else "5"
     from .clipboard import detect_session
-    from .paste import paste_keys_for_status, paste_tools, uinput_writable, usable_tools, ydotoold_running
+    from .paste import (
+        paste_keys_for_status,
+        paste_notes,
+        paste_tools,
+        uinput_writable,
+        usable_tools,
+        user_in_input_group,
+        ydotoold_running,
+    )
 
     session = detect_session()
     print(f"\n{section}. pasting into the focused window")
@@ -546,13 +618,23 @@ def cmd_diagnose(config: Config) -> int:
     print(f"   helpers that can paste {', '.join(usable_tools()) or 'none'}")
     if "ydotool" in paste_tools():
         print(f"   ydotoold running       {'yes' if ydotoold_running() else 'no'}")
-        print(f"   /dev/uinput writable   {'yes' if uinput_writable() else 'no — add the user to input'}")
+        writable = uinput_writable()
+        in_group = user_in_input_group()
+        detail = (
+            "yes"
+            if writable
+            else ("no — the input group is not active in this session" if in_group else "no")
+        )
+        print(f"   /dev/uinput writable   {detail}")
+        print(f"   input group            {'member' if in_group else 'not a member'}")
     print(f"   verdict                {paste_keys_for_status()}")
     if not usable_tools():
         problems.append(
             "automatic pasting is not available: the clipboard gets the item, but you must "
             "press Ctrl+V — run --setup-paste to fix that"
         )
+        for note in paste_notes():
+            print(f"   fix                    {note}")
 
     print("\nsummary")
     if not problems:
@@ -660,6 +742,8 @@ def _main(argv: list[str] | None = None) -> int:
 
     if args.diagnose:
         return cmd_diagnose(config)
+    if args.test_paste:
+        return cmd_test_paste(args.delay)
 
     if args.status or args.collect_logs or args.list is not None or args.clear:
         store = HistoryStore(config=config)

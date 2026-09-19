@@ -99,6 +99,35 @@ def paste_candidates(
     return [list(YDOTOOL_NAMES), list(YDOTOOL_CODES)]
 
 
+def wtype_supported(which: Which = shutil.which, runner: Runner = subprocess.run) -> bool | None:
+    """Whether the compositor implements the virtual keyboard protocol.
+
+    wtype needs ``zwp_virtual_keyboard_manager_v1``; Mutter (GNOME) does not
+    implement it, so an installed wtype that is never actually usable is the
+    norm on Ubuntu. ``None`` means "could not tell".
+    """
+    if not which("wtype"):
+        return None
+    try:
+        result = runner(
+            ["wtype", ""],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=3.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result is None:
+        return None
+    if result.returncode == 0:
+        return True
+    text = (result.stderr or b"").decode("utf-8", errors="replace")
+    if "virtual keyboard protocol" in text:
+        return False
+    return None
+
+
 def ydotoold_running(
     which: Which = shutil.which,
     runner: Runner = subprocess.run,
@@ -113,14 +142,10 @@ def ydotoold_running(
     if not which("ydotool"):
         return None
     environment = env if env is not None else os.environ
-    sockets = [Path(environment.get("YDOTOOL_SOCKET", "")) if environment.get("YDOTOOL_SOCKET") else None]
-    runtime = environment.get("XDG_RUNTIME_DIR")
-    if runtime:
-        sockets.append(Path(runtime) / ".ydotool_socket")
-    sockets.append(Path("/tmp/.ydotool_socket"))
-    if any(path is not None and path.exists() for path in sockets):
-        return True
     if which("pgrep"):
+        # Ask the process table first: a socket file outlives a crashed daemon
+        # (ydotoold creates it before it opens /dev/uinput), and reporting a
+        # dead daemon as running hides exactly the problem the user has.
         try:
             result = runner(
                 ["pgrep", "-x", "ydotoold"],
@@ -130,8 +155,16 @@ def ydotoold_running(
                 check=False,
             )
         except (OSError, subprocess.SubprocessError):
-            return None
-        return result.returncode == 0
+            result = None
+        if result is not None:
+            return result.returncode == 0
+    sockets = [Path(environment.get("YDOTOOL_SOCKET", "")) if environment.get("YDOTOOL_SOCKET") else None]
+    runtime = environment.get("XDG_RUNTIME_DIR")
+    if runtime:
+        sockets.append(Path(runtime) / ".ydotool_socket")
+    sockets.append(Path("/tmp/.ydotool_socket"))
+    if any(path is not None and path.exists() for path in sockets):
+        return True
     return None
 
 
@@ -218,6 +251,8 @@ def usable_tools(
     for tool in paste_tools(which, env):
         if tool == "xdotool" and session == "wayland":
             continue  # XTEST only reaches X11/XWayland clients
+        if tool == "wtype" and wtype_supported(which, runner) is False:
+            continue  # Mutter does not implement the virtual keyboard protocol
         if tool == "ydotool" and ydotoold_running(which, runner, env) is False and not uinput_writable():
             continue  # no daemon and no permission to open /dev/uinput either
         usable.append(tool)
@@ -237,6 +272,32 @@ def paste_keys_for_status(
     if tools:
         return f"no — {', '.join(tools)} installed but cannot reach the focused window (run --setup-paste)"
     return "no — nothing installed; run --setup-paste for one-step setup"
+
+
+def paste_notes(
+    which: Which = shutil.which,
+    env: dict[str, str] | None = None,
+    runner: Runner = subprocess.run,
+) -> list[str]:
+    """Why automatic pasting is off, and the shortest way to switch it on."""
+    notes: list[str] = []
+    if usable_tools(which, env, runner):
+        return notes
+    if which("ydotool") is None:
+        notes.append("ydotool is not installed — run: ubuntu-clipboard --setup-paste")
+        return notes
+    if uinput_writable() is False:
+        if user_in_input_group():
+            notes.append("the input group is set, but this session predates it")
+        else:
+            notes.append("this user is not in the input group")
+        notes.append("log out and back in once to apply it")
+        notes.append("right now, without logging out: sudo chmod 666 /dev/uinput")
+        notes.append("then: systemctl --user restart ydotoold")
+        return notes
+    if ydotoold_running(which, runner, env) is False:
+        notes.append("ydotoold is not running — start it: systemctl --user enable --now ydotoold")
+    return notes
 
 
 def paste_hint(which: Which = shutil.which, env: dict[str, str] | None = None) -> str:

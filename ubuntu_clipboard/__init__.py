@@ -6,7 +6,7 @@ and :mod:`ubuntu_clipboard.app` is importable without GTK/PyGObject.
 
 from __future__ import annotations
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 __author__ = "ubuntu-clipboard contributors"
 __license__ = "MIT"
 
