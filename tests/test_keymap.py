@@ -151,7 +151,9 @@ def test_two_latin_layouts_do_not_duplicate_the_binding():
     ]
 
 
-def test_only_the_primary_survives_without_a_backend():
+def test_only_the_primary_survives_without_a_backend(monkeypatch):
+    """No libxkbcommon (or none that works) must leave the plain binding alone."""
+    monkeypatch.setattr(keymap, "default_backend", lambda: None)
     layouts = [("us", ""), ("ir", "")]
     assert keymap.shortcut_bindings("<Super>v", layouts=layouts, backend=None) == ["<Super>v"]
 
