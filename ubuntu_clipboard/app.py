@@ -102,7 +102,6 @@ if HAS_GTK:
             self._config_monitor = None
             self._previous_window = None
             self._save_guard_until = 0.0
-            self._started = False
             self._reload_pending = False
             self.set_application_name(APP_NAME)
 
@@ -123,7 +122,6 @@ if HAS_GTK:
             self._start_monitor()
             # Keep running without any window (background/autostart mode).
             self.hold()
-            self._started = True
 
         def do_activate(self) -> None:  # noqa: N802 - GObject vfunc
             if self.start_hidden:
@@ -231,7 +229,7 @@ if HAS_GTK:
                 log.error("no display available — clipboard history is not active")
                 return
             self._clipboard = clipboard
-            self.monitor = ClipboardMonitor(self.store, config_provider=lambda: self.config)
+            self.monitor = ClipboardMonitor(self.store)
             self.monitor.attach(clipboard)
 
         def set_clipboard(self, item: ClipboardItem) -> bool:

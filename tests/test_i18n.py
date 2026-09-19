@@ -62,10 +62,6 @@ def test_rtl_detection():
     assert i18n.is_rtl() is False
 
 
-def test_available_languages():
-    assert set(i18n.available_languages()) == {"fa", "en"}
-
-
 def test_get_language_is_memoised(monkeypatch):
     i18n.set_language("en")
     monkeypatch.setenv("LANG", "fa_IR.UTF-8")

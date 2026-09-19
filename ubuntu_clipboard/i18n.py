@@ -18,10 +18,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # ── application ────────────────────────────────────────────────────────
     "app.name": {"fa": "کلیپ‌بورد", "en": "Clipboard"},
     "app.subtitle": {"fa": "تاریخچه کلیپ‌بورد • Win+V", "en": "Clipboard history • Win+V"},
-    "app.description": {
-        "fa": "تاریخچه کلیپ‌بورد شبیه ویندوز ۱۱ برای اوبونتو",
-        "en": "Windows 11 style clipboard history for Ubuntu",
-    },
     # ── search & actions ───────────────────────────────────────────────────
     "search.placeholder": {"fa": "جستجو در تاریخچه…", "en": "Search history…"},
     "action.clear": {"fa": "پاک کردن همه", "en": "Clear all"},
@@ -31,9 +27,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "action.pin": {"fa": "سنجاق کردن", "en": "Pin"},
     "action.unpin": {"fa": "برداشتن سنجاق", "en": "Unpin"},
     "action.delete": {"fa": "حذف", "en": "Delete"},
-    "action.paste": {"fa": "جای‌گذاری", "en": "Paste"},
     "action.about": {"fa": "درباره", "en": "About"},
-    "action.quit": {"fa": "خروج", "en": "Quit"},
     # ── list ───────────────────────────────────────────────────────────────
     "section.pinned": {"fa": "سنجاق‌شده", "en": "Pinned"},
     "section.recent": {"fa": "اخیر", "en": "Recent"},
@@ -77,7 +71,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Every item will be removed. Do you want to continue?",
     },
     "button.cancel": {"fa": "انصراف", "en": "Cancel"},
-    "button.save": {"fa": "ذخیره", "en": "Save"},
     "button.ok": {"fa": "تأیید", "en": "OK"},
     # ── notifications ──────────────────────────────────────────────────────
     "notify.copied": {
@@ -136,15 +129,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.shortcut.install": {"fa": "ثبت میانبر", "en": "Install shortcut"},
     "settings.shortcut.installed": {"fa": "ثبت شده", "en": "Installed"},
-    "settings.shortcut.conflict": {
-        "fa": "میانبر {binding} با میانبر پیش‌فرض گنوم تداخل دارد و غیرفعال می‌شود",
-        "en": "{binding} is used by GNOME and will be unbound",
-    },
     "settings.shortcut.failed": {
         "fa": "ثبت میانبر ناموفق بود — از مسیر Settings → Keyboard امتحان کنید",
         "en": "Could not install the shortcut — use Settings → Keyboard instead",
     },
-    "settings.version": {"fa": "نسخه {version}", "en": "Version {version}"},
     "settings.config_file": {"fa": "فایل تنظیمات", "en": "Configuration file"},
     "settings.application": {"fa": "برنامه", "en": "Application"},
     "settings.reset": {"fa": "بازگشت به پیش‌فرض", "en": "Reset to defaults"},
@@ -201,7 +189,3 @@ def t(key: str, **kwargs: object) -> str:
             log.warning("cannot format translation %r with %r", key, kwargs)
             return text
     return text
-
-
-def available_languages() -> tuple[str, ...]:
-    return tuple(sorted({lang for entry in TRANSLATIONS.values() for lang in entry}))

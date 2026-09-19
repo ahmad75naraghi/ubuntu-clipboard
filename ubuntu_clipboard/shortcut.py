@@ -143,10 +143,6 @@ def binding_command(path: str, runner: Runner = subprocess.run) -> str:
     return get_value(SCHEMA, "command", path, runner) or ""
 
 
-def binding_of(path: str, runner: Runner = subprocess.run) -> str:
-    return get_value(SCHEMA, "binding", path, runner) or ""
-
-
 def owns_binding(path: str, runner: Runner = subprocess.run) -> bool:
     command = binding_command(path, runner)
     return any(marker in command for marker in OWNED_MARKERS)

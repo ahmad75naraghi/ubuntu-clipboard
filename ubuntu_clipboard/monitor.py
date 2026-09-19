@@ -13,7 +13,6 @@ import logging
 import time
 from collections.abc import Callable
 
-from .config import Config, get_config
 from .models import ClipboardItem
 from .storage import HistoryStore
 
@@ -49,26 +48,15 @@ def is_password_hint(formats: object) -> bool:
         return False
 
 
-def choose_payload(has_texture: bool, has_files: bool) -> str:
-    """Pick the richest representation offered by the clipboard."""
-    if has_texture:
-        return "image"
-    if has_files:
-        return "files"
-    return "text"
-
-
 class ClipboardMonitor:
     """Watches a :class:`Gdk.Clipboard` and forwards new payloads to the store."""
 
     def __init__(
         self,
         store: HistoryStore,
-        config_provider: Callable[[], Config] = get_config,
         on_capture: Callable[[ClipboardItem], None] | None = None,
     ) -> None:
         self.store = store
-        self._config_provider = config_provider
         self._on_capture = on_capture
         self._clipboard = None
         self._handler_id: int | None = None

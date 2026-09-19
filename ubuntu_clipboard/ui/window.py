@@ -43,7 +43,6 @@ class ClipboardWindow(Gtk.ApplicationWindow):  # type: ignore[misc]
         self._refresh_pending = False
         self._was_active = False
         self._focus_grace_until = 0.0
-        self._focus_handler = None
 
         self.set_title(t("app.name"))
         self.set_default_size(self.config.window_width, self.config.window_height)

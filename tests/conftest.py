@@ -53,7 +53,7 @@ class FakeGsettings:
     def _key(target: str, key: str) -> str:
         return f"{target}|{key}"
 
-    def __call__(self, command, **kwargs) -> subprocess.CompletedProcess:
+    def __call__(self, command, **_kwargs) -> subprocess.CompletedProcess:
         command = list(command)
         self.calls.append(command)
         if len(command) < 4 or command[0] != "gsettings":

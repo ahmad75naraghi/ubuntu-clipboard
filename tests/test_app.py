@@ -55,7 +55,7 @@ def test_gtk_available_reports_the_double(env):
 # ── clipboard monitor ──────────────────────────────────────────────────────
 def attach(env, **payload) -> object:
     env.clipboard.__init__(**payload)  # type: ignore[misc]
-    monitor = env.monitor_module.ClipboardMonitor(env.store, config_provider=lambda: env.app.config)
+    monitor = env.monitor_module.ClipboardMonitor(env.store)
     monitor.attach(env.clipboard)
     return monitor
 
@@ -125,9 +125,7 @@ def test_monitor_capture_callback_errors_are_isolated(env):
         raise RuntimeError("listener")
 
     env.clipboard.__init__(text="x")  # type: ignore[misc]
-    monitor = env.monitor_module.ClipboardMonitor(
-        env.store, config_provider=lambda: env.app.config, on_capture=explode
-    )
+    monitor = env.monitor_module.ClipboardMonitor(env.store, on_capture=explode)
     monitor.attach(env.clipboard)
     assert env.store.count() == 1
 

@@ -83,7 +83,6 @@ class HistoryStore:
         self._connections: list[sqlite3.Connection] = []
         self._lock = threading.RLock()
         self._listeners: list[Callable[[], None]] = []
-        self._closed = False
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._migrate_legacy_database_file()
         self._initialize()
@@ -199,7 +198,6 @@ class HistoryStore:
                 with contextlib.suppress(sqlite3.Error):  # pragma: no cover - defensive
                     connection.close()
             self._connections.clear()
-            self._closed = True
             self._local = threading.local()
 
     # ── change notification ────────────────────────────────────────────────

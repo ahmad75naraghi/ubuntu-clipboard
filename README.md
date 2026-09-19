@@ -6,7 +6,7 @@
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-266%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-265%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -236,7 +236,7 @@ ubuntu_clipboard/
 ├── monitor.py       # مانیتور رویدادمحور کلیپ‌بورد روی Gdk.Clipboard (بدون polling)
 ├── storage.py       # SQLite (WAL)، مهاجرت schema، dedup، جستجو، pin، آمار
 ├── models.py        # تشخیص نوع محتوا، hash، پیش‌نمایش، زمان نسبی
-├── clipboard.py     # لایه فرمان‌های wl-copy/wl-paste/xclip/xsel (برای اسکریپت‌ها)
+├── clipboard.py     # تشخیص نشست و توانمندی‌های محیط (Wayland/X11، ابزارهای متن)
 ├── paste.py         # شبیه‌سازی Ctrl+V با ydotool/wtype/xdotool
 ├── shortcut.py      # مدیریت میانبر GNOME با gsettings (بدون sed)
 ├── install.py       # میان‌بر دسکتاپ، آیکون، autostart، پاک‌سازی نسخه ۱
@@ -251,7 +251,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۲۶۶ تست
+└── test_*.py        # ۲۶۵ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -297,7 +297,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۲۶۶ تست
+make test        # ۲۶۵ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -386,7 +386,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 182 headless
+module outside `ui/` is importable without a display, which is what the 265 headless
 tests exercise.
 
 ```bash

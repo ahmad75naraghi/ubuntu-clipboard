@@ -19,7 +19,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 - Privacy filters for credit card numbers, `password=`/`api_key=` style lines and PEM
   private keys, plus support for the `x-kde-passwordManagerHint` clipboard marker.
 - English and Persian translations with automatic RTL layout, `language: "auto"`.
-- Test suite of 266 headless tests, including `tests/gtk_double.py`, a small stand-in for
+- Test suite of 265 headless tests, including `tests/gtk_double.py`, a small stand-in for
   GTK that exercises the window, the preferences dialog, the clipboard monitor and the
   application object without a display.
 - `scripts/check_gtk_api.py`, a static verifier for the GTK 4 / libadwaita API surface,
