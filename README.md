@@ -2,11 +2,11 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.1.1-blue)
+![Version](https://img.shields.io/badge/version-2.1.2-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-338%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-353%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -167,6 +167,7 @@ ubuntu-clipboard [options]
 | `--yes` | همراه `--setup-paste`: بدون پرسیدن تأییدیه اجرا کن |
 | `--test-paste` | بعد از چند ثانیه `Ctrl+V` می‌فرستد تا ببینی چسباندن کار می‌کند یا نه |
 | `--delay SECONDS` | همراه `--test-paste`: فاصلهٔ پیش‌فرض (۵ ثانیه) را عوض کن |
+| `--item N` | همراه `--test-paste`: آیتم شمارهٔ N از `--list` را در کلیپ‌بورد بگذار |
 | `--status` | وضعیت کامل محیط، دیتابیس، میان‌بر و سرویس |
 | `--logs [N]` | چاپ N خط آخر لاگ (پیش‌فرض ۲۰۰) |
 | `--clear-logs` | پاک کردن فایل‌های لاگ |
@@ -176,7 +177,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.1.1
+Ubuntu Clipboard 2.1.2
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -260,7 +261,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۳۸ تست
+└── test_*.py        # ۳۵۳ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -306,7 +307,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۳۸ تست
+make test        # ۳۵۳ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -374,10 +375,18 @@ ubuntu-clipboard --test-paste      # در ۵ ثانیهٔ آینده Ctrl+V می
 ```
 
 `--test-paste` بعد از شمارش معکوس، همان میان‌بر چسباندن را می‌فرستد و می‌گوید کدام ابزار
-کار کرد؛ `--diagnose` هم اگر گروه `input` در نشست فعال نباشد همین را توضیح می‌دهد. دقت
-کن که `wtype` روی گنوم کار نمی‌کند (Mutter پروتکل کیبورد مجازی را ندارد) و `xdotool`
-هم فقط به پنجره‌های X11/XWayland می‌رسد — پس روی گنوم/وی‌لند تنها راه واقعی `ydotool`
-است.
+کار کرد؛ `--test-paste --item 2` هم اول آیتم شمارهٔ ۲ از `--list` را در کلیپ‌بورد می‌گذارد
+(و تأیید می‌کند که واقعاً آنجا نشسته است) و بعد `Ctrl+V` می‌فرستد. `--diagnose` اگر گروه
+`input` در نشست فعال نباشد همین را توضیح می‌دهد. دقت کن که `wtype` روی گنوم کار نمی‌کند
+(Mutter پروتکل کیبورد مجازی را ندارد) و `xdotool` هم فقط به پنجره‌های X11/XWayland
+می‌رسد — پس روی گنوم/وی‌لند تنها راه واقعی `ydotool` است.
+
+**چرا قبل از `Ctrl+V` کلیپ‌بورد «تأیید» می‌شود؟** نوشتن در کلیپ‌بورد و فشردن کلید دو
+سیستم جدا هستند و ممکن است کلید زودتر برسد؛ بعضی برنامه‌ها (به‌ویژه برنامه‌های جاوا مثل
+Android Studio که از سمت X11/XWayland می‌خوانند) در آن حالت *محتوای قبلی* را می‌چسبانند.
+از ۲.۱.۲ برنامه قبل از فرستادن کلید، محتوای کلیپ‌بورد را از هر دو سمت (وی‌لند و X11)
+می‌خواند و اگر لازم باشد با `wl-copy` و `xclip` هر دو سمت را بازنویسی می‌کند تا همان
+آیتمِ انتخاب‌شده در هر دو سمت بنشیند.
 
 تا وقتی این کار انجام نشده، برنامه صادقانه اطلاع می‌دهد: آیتم کپی می‌شود و باید خودتان
 `Ctrl+V` بزنید. `--status` هم در خط `auto paste` وضعیت واقعی را نشان می‌دهد
@@ -469,7 +478,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 338 headless
+module outside `ui/` is importable without a display, which is what the 353 headless
 tests exercise.
 
 ```bash

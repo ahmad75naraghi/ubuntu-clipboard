@@ -267,3 +267,160 @@ def test_paste_notes_explain_the_input_group(monkeypatch):
 def test_paste_notes_are_empty_when_pasting_works(monkeypatch):
     monkeypatch.setattr(paste, "usable_tools", lambda *_a, **_k: ["ydotool"])
     assert paste.paste_notes() == []
+
+
+class RecordingPopen:
+    """Stands in for ``subprocess.Popen``: records argv and the piped payload."""
+
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self.calls: list[dict] = []
+
+    def __call__(self, command, **_kwargs):
+        if self.fail:
+            raise OSError("no such helper")
+        record: dict = {"command": list(command), "data": bytearray()}
+
+        class _Stdin:
+            def write(self, data: bytes) -> None:
+                record["data"] += data
+
+            def close(self) -> None:
+                return None
+
+        self.calls.append(record)
+        return type("P", (), {"stdin": _Stdin(), "pid": 1})()
+
+    @property
+    def last(self) -> tuple[list[str], bytes]:
+        record = self.calls[-1]
+        return record["command"], bytes(record["data"])
+
+    @property
+    def argv(self) -> list[list[str]]:
+        return [record["command"] for record in self.calls]
+
+
+def test_writer_commands():
+    assert paste.writer_command("wl-copy") == ["wl-copy", "--type", "text/plain;charset=utf-8"]
+    assert paste.writer_command("xclip") == ["xclip", "-selection", "clipboard", "-in"]
+    assert paste.reader_command("wl-paste") == ["wl-paste", "--no-newline"]
+    with pytest.raises(ValueError):
+        paste.writer_command("nope")
+    with pytest.raises(ValueError):
+        paste.reader_command("nope")
+
+
+def test_write_clipboard_prefers_the_session_tool():
+    popen = RecordingPopen()
+    tool = paste.write_clipboard_text("hello", which_for("wl-copy"), {"XDG_SESSION_TYPE": "wayland"}, popen)
+    assert tool == "wl-copy"
+    assert popen.last[0][0] == "wl-copy"
+    assert popen.last[1] == b"hello"
+
+    popen = RecordingPopen()
+    tool = paste.write_clipboard_text(
+        "hello", which_for("wl-copy", "xclip"), {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}, popen
+    )
+    assert tool == "xclip"
+
+
+def test_write_clipboard_publishes_both_sides():
+    """X11 clients (Java IDEs) read the X11 selection; publish there as well."""
+    popen = RecordingPopen()
+    tool = paste.write_clipboard_text(
+        "hello", which_for("wl-copy", "xclip"), {"XDG_SESSION_TYPE": "wayland", "DISPLAY": ":0"}, popen
+    )
+    assert tool == "wl-copy"
+    assert [command[0] for command in popen.argv] == ["wl-copy", "xclip"]
+    assert [bytes(record["data"]) for record in popen.calls] == [b"hello", b"hello"]
+
+
+def test_write_clipboard_skips_x11_without_display():
+    popen = RecordingPopen()
+    paste.write_clipboard_text("hello", which_for("wl-copy", "xclip"), {"XDG_SESSION_TYPE": "wayland"}, popen)
+    assert [command[0] for command in popen.argv] == ["wl-copy"]
+
+
+def test_write_clipboard_without_tools():
+    assert paste.write_clipboard_text("hello", which_for(), {}, RecordingPopen()) is None
+    assert paste.write_clipboard_text("hello", which_for("wl-copy"), {}, RecordingPopen(fail=True)) is None
+
+
+def test_read_clipboard_uses_the_writer_payload():
+    def runner(command, **_kwargs):
+        return subprocess.CompletedProcess(list(command), 0, b"the text", b"")
+
+    assert (
+        paste.read_clipboard_text(which_for("wl-paste"), runner, {"XDG_SESSION_TYPE": "wayland"})
+        == "the text"
+    )
+
+
+def test_read_clipboard_drops_the_trailing_newline():
+    """Old wl-clipboard has no --no-newline, so its output ends with one."""
+
+    def runner(command, **_kwargs):
+        if "--no-newline" in command:
+            return subprocess.CompletedProcess(list(command), 1, b"", b"unknown option")
+        return subprocess.CompletedProcess(list(command), 0, b"text\n", b"")
+
+    assert paste.read_clipboard_text(which_for("wl-paste"), runner, {}) == "text"
+
+
+def test_both_sides_must_agree():
+    """A stale X11 selection is what makes an X11 app paste the previous item."""
+
+    def runner(command, **_kwargs):
+        if command[0] == "wl-paste":
+            return subprocess.CompletedProcess(list(command), 0, b"mine", b"")
+        return subprocess.CompletedProcess(list(command), 0, b"the old one", b"")
+
+    env = {"XDG_SESSION_TYPE": "wayland", "DISPLAY": ":0"}
+    which = which_for("wl-paste", "xclip")
+    assert paste.read_clipboard_text_all(which, runner, env) == {
+        "wl-paste": "mine",
+        "xclip": "the old one",
+    }
+    assert paste.selection_agrees("mine", which, runner, env) is False
+    assert paste.selection_agrees("mine", which_for("wl-paste"), runner, env) is True
+
+
+def test_ensure_clipboard_accepts_what_is_already_there(monkeypatch):
+    monkeypatch.setattr(paste, "selection_agrees", lambda *_a, **_k: True)
+    popen = RecordingPopen()
+    verified, tool = paste.ensure_clipboard_text(
+        "same", which_for("wl-copy"), {}, popen=popen, sleep=lambda _s: None
+    )
+    assert (verified, tool) == (True, None)
+    assert popen.calls == []  # nothing was rewritten
+
+
+def test_ensure_clipboard_rewrites_when_the_gtk_write_is_missing(monkeypatch):
+    """This is the "it pastes the last item" case: the new content was not there."""
+    agreed = {"value": False}
+    popen = RecordingPopen()
+
+    def agrees(*_args, **_kwargs):
+        return agreed["value"]
+
+    def starter(command, **kwargs):
+        process = popen(command, **kwargs)
+        agreed["value"] = True  # the external write publishes the item
+        return process
+
+    monkeypatch.setattr(paste, "selection_agrees", agrees)
+    verified, tool = paste.ensure_clipboard_text(
+        "the item I selected", which_for("wl-copy"), {}, popen=starter, sleep=lambda _s: None
+    )
+    assert (verified, tool) == (True, "wl-copy")
+    assert popen.last[1] == b"the item I selected"
+
+
+def test_ensure_clipboard_reports_a_stubborn_clipboard(monkeypatch):
+    monkeypatch.setattr(paste, "selection_agrees", lambda *_a, **_k: False)
+    verified, tool = paste.ensure_clipboard_text(
+        "mine", which_for("wl-copy"), {}, popen=RecordingPopen(), sleep=lambda _s: None
+    )
+    assert verified is False
+    assert tool == "wl-copy"

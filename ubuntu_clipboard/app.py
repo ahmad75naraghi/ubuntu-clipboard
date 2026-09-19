@@ -28,7 +28,7 @@ from . import APP_ICON, APP_ID, APP_NAME, __version__
 from .config import Config, config_path, get_config
 from .i18n import is_rtl, set_language, t
 from .models import ClipboardItem, ContentType
-from .paste import activate_window, active_window, paste_hint, send_paste
+from .paste import activate_window, active_window, ensure_clipboard_text, paste_hint, send_paste
 from .storage import HistoryStore
 
 log = logging.getLogger(__name__)
@@ -102,6 +102,7 @@ if HAS_GTK:
             self._css_provider = None
             self._config_monitor = None
             self._previous_window = None
+            self._expected_text: str | None = None
             self._save_guard_until = 0.0
             self._reload_pending = False
             # ``GApplication`` has no ``set_application_name``; the GLib global
@@ -240,6 +241,9 @@ if HAS_GTK:
             if self._clipboard is None or self.monitor is None:
                 return False
             self.monitor.suppress()
+            # Kept for the verification step in :meth:`_paste_worker`: only a
+            # text payload can be compared cheaply.
+            self._expected_text = None
             try:
                 if item.type is ContentType.IMAGE:
                     data = self.store.get_image_bytes(item.id)
@@ -263,6 +267,7 @@ if HAS_GTK:
                     text = self.store.get_text(item.id)
                     if text is None:
                         return False
+                    self._expected_text = text
                     try:
                         provider = Gdk.ContentProvider.new_for_value(text)
                     except Exception:  # pragma: no cover - defensive
@@ -282,6 +287,12 @@ if HAS_GTK:
                 self.notify(t("notify.copied"))
                 return
             self.store.touch(item.id)
+            log.info(
+                "pasting item #%s (%s, %d chars)",
+                item.id,
+                item.type.value,
+                len(self._expected_text or ""),
+            )
             GLib.timeout_add(PASTE_DELAY_MS, self._deliver_paste)
 
         def _deliver_paste(self) -> bool:
@@ -292,6 +303,7 @@ if HAS_GTK:
             if self._previous_window:
                 activate_window(self._previous_window)
                 self._previous_window = None
+            self._ensure_clipboard_content()
             succeeded, tool = send_paste()
             if not succeeded:
                 # Be specific: the item *is* on the clipboard, but the user has
@@ -300,6 +312,31 @@ if HAS_GTK:
                 log.info("automatic paste unavailable — see --setup-paste")
             else:
                 log.debug("pasted with %s", tool)
+
+        def _ensure_clipboard_content(self) -> None:
+            """Do not press ``Ctrl+V`` until the clipboard really holds our item.
+
+            GTK's clipboard write is asynchronous and a receiving application can
+            read the previous selection if the new one has not been published
+            yet — which is how "it pastes the last item instead of the one I
+            chose" happens. The payload is read back first, and written again
+            with an external helper (``wl-copy``/``xclip``) when it is missing.
+            """
+            expected = self._expected_text
+            if expected is None:
+                return
+            verified, tool = ensure_clipboard_text(expected)
+            if verified and tool is None:
+                log.debug("clipboard verified after the GTK write (%d chars)", len(expected))
+            elif verified:
+                # The external write is one more change the monitor must ignore.
+                self.monitor.suppress()
+                log.info("clipboard re-written with %s and verified (%d chars)", tool, len(expected))
+            else:
+                log.warning(
+                    "the clipboard does not hold the selected item (%d chars) — pasting anyway",
+                    len(expected),
+                )
 
         def clear_history(self) -> int:
             removed = self.store.clear()

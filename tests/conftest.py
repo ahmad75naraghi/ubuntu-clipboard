@@ -34,6 +34,7 @@ def isolated_home(tmp_path, monkeypatch):
 def instant_sleep(monkeypatch):
     """Never wait for a daemon in tests: the wait logic is exercised directly."""
     monkeypatch.setattr("ubuntu_clipboard.shortcut.SLEEP", lambda _seconds: None)
+    monkeypatch.setattr("ubuntu_clipboard.paste.SLEEP", lambda _seconds: None)
 
 
 @pytest.fixture

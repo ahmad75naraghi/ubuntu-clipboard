@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,9 @@ log = logging.getLogger(__name__)
 Command = list[str]
 Which = Callable[[str], str | None]
 Runner = Callable[..., subprocess.CompletedProcess]
+
+#: Sleeping between clipboard read-backs; tests replace it.
+SLEEP: Callable[[float], None] = time.sleep
 
 #: Ordered by reliability on GNOME.
 WAYLAND_TOOLS = ("ydotool", "wtype", "xdotool")
@@ -300,6 +304,17 @@ def paste_notes(
     return notes
 
 
+def clipboard_holds_text(
+    text: str,
+    which: Which = shutil.which,
+    env: dict[str, str] | None = None,
+    runner: Runner = subprocess.run,
+    timeout: float = 3.0,
+) -> bool:
+    """Whether the selection currently holds exactly ``text``."""
+    return read_clipboard_text(which, runner, env, timeout) == text
+
+
 def paste_hint(which: Which = shutil.which, env: dict[str, str] | None = None) -> str:
     """The sentence shown when automatic pasting is not possible."""
     if usable_tools(which, env):
@@ -310,6 +325,13 @@ def paste_hint(which: Which = shutil.which, env: dict[str, str] | None = None) -
 __all__: Sequence[str] = (
     "Step",
     "activate_window",
+    "clipboard_holds_text",
+    "ensure_clipboard_text",
+    "read_clipboard_text",
+    "read_clipboard_text_all",
+    "read_with",
+    "selection_agrees",
+    "write_clipboard_text",
     "active_window",
     "can_paste",
     "paste_candidates",
@@ -328,6 +350,197 @@ __all__: Sequence[str] = (
 )
 
 # ── automatic paste setup (Ubuntu ships ydotool without a daemon unit) ─────
+# ── clipboard writing & verification ──────────────────────────────────────
+#: Writers that keep the selection alive after we exit (they fork a child).
+CLIPBOARD_WRITERS = ("wl-copy", "xclip")
+#: Readers that print the selection and exit.
+CLIPBOARD_READERS = ("wl-paste", "xclip", "xsel")
+#: Writing the clipboard and pressing Ctrl+V are two asynchronous systems; a
+#: receiving application (Java/AWT ones especially) can read the *old* content
+#: if the new selection has not been published yet. So the write is verified.
+VERIFY_ATTEMPTS = 10
+VERIFY_PAUSE_SECONDS = 0.05
+
+
+def writer_command(tool: str) -> Command:
+    """argv of a clipboard writer (the payload arrives on stdin)."""
+    if tool == "wl-copy":
+        return ["wl-copy", "--type", "text/plain;charset=utf-8"]
+    if tool == "xclip":
+        return ["xclip", "-selection", "clipboard", "-in"]
+    if tool == "xsel":
+        return ["xsel", "--clipboard", "--input"]
+    raise ValueError(f"unknown clipboard writer: {tool}")
+
+
+def reader_command(tool: str, no_newline: bool = True) -> Command:
+    """argv of a clipboard reader (the payload is printed to stdout)."""
+    if tool == "wl-paste":
+        return ["wl-paste", "--no-newline"] if no_newline else ["wl-paste"]
+    if tool == "xclip":
+        return ["xclip", "-selection", "clipboard", "-o"]
+    if tool == "xsel":
+        return ["xsel", "--clipboard", "--output"]
+    raise ValueError(f"unknown clipboard reader: {tool}")
+
+
+def _session_order(tools: Sequence[str], env: dict[str, str] | None) -> list[str]:
+    order = list(tools)
+    if detect_session(env) == "x11":
+        order.reverse()
+    return order
+
+
+def write_clipboard_text(
+    text: str,
+    which: Which = shutil.which,
+    env: dict[str, str] | None = None,
+    popen: Callable[..., object] | None = None,
+) -> str | None:
+    """Publish ``text`` on **every** clipboard side that exists.
+
+    ``wl-copy``/``xclip`` fork a child that owns the selection and inherit our
+    pipes, so they are started with ``Popen`` and deliberately never waited for
+    (waiting is what made the v1 code hang); closing stdin publishes the value.
+
+    GNOME always runs XWayland, and X11 clients — Java applications such as
+    Android Studio above all — read the *X11* selection. When only the Wayland
+    side is published they can hand the application the previous content, which
+    is how "it pastes the last item instead of the one I chose" happens. Both
+    sides are therefore written, and the first helper used is returned.
+    """
+    starter = popen or subprocess.Popen
+    environment = env if env is not None else os.environ
+    used: str | None = None
+    for tool in _session_order(CLIPBOARD_WRITERS, env):
+        if not which(tool):
+            continue
+        if tool == "xclip" and not environment.get("DISPLAY"):
+            continue  # no X server (or XWayland) to talk to
+        try:
+            process = starter(
+                writer_command(tool),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            assert process.stdin is not None  # noqa: S101 - set by stdin=PIPE
+            process.stdin.write(text.encode("utf-8"))
+            process.stdin.close()
+        except (OSError, AttributeError, ValueError) as exc:
+            log.debug("%s could not take the clipboard: %s", tool, exc)
+            continue
+        log.debug("clipboard written with %s (%d chars)", tool, len(text))
+        used = used or tool
+    return used
+
+
+def read_clipboard_text(
+    which: Which = shutil.which,
+    runner: Runner = subprocess.run,
+    env: dict[str, str] | None = None,
+    timeout: float = 3.0,
+) -> str | None:
+    """The selection as text, or ``None`` when no helper could read it."""
+    for tool in _session_order(CLIPBOARD_READERS, env):
+        if which(tool):
+            return read_with(tool, runner, timeout)
+    return None
+
+
+def read_clipboard_text_all(
+    which: Which = shutil.which,
+    runner: Runner = subprocess.run,
+    env: dict[str, str] | None = None,
+    timeout: float = 3.0,
+) -> dict[str, str | None]:
+    """What each installed side of the clipboard shows (``None`` = unreadable).
+
+    ``wl-paste`` answers for the Wayland side, ``xclip``/``xsel`` for the X11
+    (XWayland) side. They are supposed to agree; a disagreement is exactly the
+    stale content an X11 application would paste.
+    """
+    environment = env if env is not None else os.environ
+    state: dict[str, str | None] = {}
+    for tool in _session_order(CLIPBOARD_READERS, env):
+        if not which(tool) or (tool in {"xclip", "xsel"} and not environment.get("DISPLAY")):
+            continue
+        state[tool] = read_with(tool, runner, timeout)
+    return state
+
+
+def read_with(
+    tool: str,
+    runner: Runner = subprocess.run,
+    timeout: float = 3.0,
+) -> str | None:
+    """Read the selection with one specific helper (``None`` when it cannot).
+
+    ``wl-paste`` gained ``--no-newline`` in wl-clipboard 2.0, so the plain form
+    (which appends one newline) is kept as a fallback.
+    """
+    for no_newline in (True, False) if tool == "wl-paste" else (True,):
+        argv = reader_command(tool, no_newline)
+        try:
+            result = runner(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.debug("%s could not read the clipboard: %s", tool, exc)
+            return None
+        if result is not None and result.returncode == 0:
+            text = (result.stdout or b"").decode("utf-8", errors="replace")
+            # ``wl-paste`` without ``--no-newline`` (old wl-clipboard) adds one.
+            return text[:-1] if (not no_newline and text.endswith("\n")) else text
+    return None
+
+
+def selection_agrees(
+    text: str,
+    which: Which = shutil.which,
+    runner: Runner = subprocess.run,
+    env: dict[str, str] | None = None,
+) -> bool:
+    """Whether every readable side of the clipboard holds exactly ``text``."""
+    state = read_clipboard_text_all(which, runner, env)
+    answers = [value for value in state.values() if value is not None]
+    return bool(answers) and all(value == text for value in answers)
+
+
+def ensure_clipboard_text(
+    text: str,
+    which: Which = shutil.which,
+    env: dict[str, str] | None = None,
+    runner: Runner = subprocess.run,
+    popen: Callable[..., object] | None = None,
+    attempts: int = VERIFY_ATTEMPTS,
+    pause: float = VERIFY_PAUSE_SECONDS,
+    sleep: Callable[[float], None] | None = None,
+) -> tuple[bool, str | None]:
+    """Make sure the clipboard *really* holds ``text`` before a paste is sent.
+
+    Returns ``(verified, tool)``: ``tool`` is the helper used for a re-write when
+    the first (GTK) write had not been published yet.
+    """
+    sleeper = sleep or SLEEP
+    for _ in range(max(1, attempts)):
+        if selection_agrees(text, which, runner, env):
+            return True, None
+        sleeper(pause)
+    tool = write_clipboard_text(text, which, env, popen)
+    if tool is None:
+        return False, None
+    for _ in range(max(1, attempts)):
+        if selection_agrees(text, which, runner, env):
+            return True, tool
+        sleeper(pause)
+    return False, tool
+
+
 #: Debian/Ubuntu split the daemon into its own package and ship no unit file,
 #: so the user service has to be written by hand.
 YDOTOOLD_UNIT = """[Unit]

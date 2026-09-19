@@ -439,3 +439,58 @@ def test_diagnose_prints_the_fix_for_the_input_group(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "the input group is not active in this session" in out
     assert "chmod 666 /dev/uinput" in out
+
+
+def test_test_paste_can_write_a_history_item(monkeypatch, capsys):
+    import ubuntu_clipboard.cli as cli_module
+    from ubuntu_clipboard.storage import HistoryStore
+
+    store = HistoryStore(config=Config())
+    store.add_text("first")
+    store.add_text("the one I want")
+    monkeypatch.setattr(cli_module, "HistoryStore", lambda **kwargs: store)
+    monkeypatch.setattr("ubuntu_clipboard.paste.usable_tools", lambda *a, **k: ["ydotool"])
+    monkeypatch.setattr("ubuntu_clipboard.paste.ensure_clipboard_text", lambda *a, **k: (True, "wl-copy"))
+    monkeypatch.setattr("ubuntu_clipboard.paste.clipboard_holds_text", lambda *a, **k: True)
+    monkeypatch.setattr("ubuntu_clipboard.paste.send_paste", lambda *a, **k: (True, "ydotool"))
+    monkeypatch.setattr("ubuntu_clipboard.cli._clipboard_preview", lambda: "the one I want")
+    assert cli.main(["--test-paste", "--item", "1", "--delay", "0"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "the one I want" in out
+    assert "re-published with wl-copy" in out
+    assert "pressed Ctrl+V" in out
+
+
+def test_test_paste_reports_an_unknown_item(monkeypatch, capsys):
+    import ubuntu_clipboard.cli as cli_module
+    from ubuntu_clipboard.storage import HistoryStore
+
+    store = HistoryStore(config=Config())
+    monkeypatch.setattr(cli_module, "HistoryStore", lambda **kwargs: store)
+    assert cli.main(["--test-paste", "--item", "9", "--delay", "0"]) == cli.EXIT_FAILURE
+    assert "no history item 9" in capsys.readouterr().out
+
+
+def test_item_needs_test_paste():
+    with pytest.raises(SystemExit) as info:
+        cli.main(["--item", "2"])
+    assert info.value.code == 2
+
+
+def test_test_paste_reports_a_clipboard_that_refuses_the_item(monkeypatch, capsys):
+    import ubuntu_clipboard.cli as cli_module
+    from ubuntu_clipboard.storage import HistoryStore
+
+    store = HistoryStore(config=Config())
+    store.add_text("mine")
+    monkeypatch.setattr(cli_module, "HistoryStore", lambda **kwargs: store)
+    monkeypatch.setattr("ubuntu_clipboard.paste.ensure_clipboard_text", lambda *a, **k: (False, "wl-copy"))
+    monkeypatch.setattr(
+        "ubuntu_clipboard.paste.read_clipboard_text_all",
+        lambda *a, **k: {"wl-paste": "mine", "xclip": "the stale one"},
+    )
+    monkeypatch.setattr("ubuntu_clipboard.paste.paste_notes", lambda *a, **k: [])
+    assert cli.main(["--test-paste", "--item", "1", "--delay", "0"]) == cli.EXIT_FAILURE
+    out = capsys.readouterr().out
+    assert "the sides disagree" in out
+    assert "the stale one" in out

@@ -124,6 +124,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="press Ctrl+V in a few seconds so you can see whether pasting works",
     )
     diagnostics.add_argument(
+        "--item",
+        type=int,
+        metavar="N",
+        help="with --test-paste: put the N-th history item (as printed by --list) on the clipboard first",
+    )
+    diagnostics.add_argument(
         "--delay",
         type=float,
         default=5.0,
@@ -187,6 +193,8 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--yes only makes sense with --setup-paste")
     if getattr(args, "delay", 5.0) != 5.0 and not getattr(args, "test_paste", False):
         parser.error("--delay only makes sense with --test-paste")
+    if getattr(args, "item", None) is not None and not getattr(args, "test_paste", False):
+        parser.error("--item only makes sense with --test-paste")
     others = ("install", "uninstall", "install_shortcut", "remove_shortcut")
     if getattr(args, "setup_paste", False) and any(getattr(args, name, False) for name in others):
         parser.error("--setup-paste cannot be combined with the other integration options")
@@ -465,16 +473,60 @@ def _clipboard_preview(limit: int = 60) -> str:
     return ""
 
 
-def cmd_test_paste(delay: float = 5.0) -> int:
+def _test_paste_item(store: HistoryStore, number: int) -> tuple[str | None, str]:
+    """Resolve ``--item N`` (list position first, then item id) to its text."""
+    items = store.list(limit=500)
+    item = items[number - 1] if 1 <= number <= len(items) else store.get(number)
+    if item is None:
+        return None, f"no history item {number} — see: {APP_NAME.lower()} --list"
+    text = store.get_text(item.id)
+    if not text:
+        return None, f"item #{item.id} is a {item.type.value} item; the paste test needs text"
+    return text, f"item #{item.id} ({item.type.value}, {len(text)} chars)"
+
+
+def cmd_test_paste(delay: float = 5.0, item_number: int | None = None) -> int:
     """Press Ctrl+V after a countdown — the honest way to check pasting."""
-    from .paste import paste_notes, send_paste, usable_tools
+    from .paste import (
+        ensure_clipboard_text,
+        paste_notes,
+        read_clipboard_text_all,
+        send_paste,
+        usable_tools,
+    )
 
     print(f"{APP_NAME} {__version__} — paste test")
     tools = usable_tools()
     print(f"  helpers that can paste  {', '.join(tools) or 'none'}")
+
+    if item_number is not None:
+        from .config import get_config
+
+        store = HistoryStore(config=get_config())
+        try:
+            text, label = _test_paste_item(store, item_number)
+        finally:
+            store.close()
+        if text is None:
+            print(f"  {label}")
+            return EXIT_FAILURE
+        print(f"  putting on clipboard    {label}")
+        print(f"  preview                 {text.strip()[:60].replace(chr(10), ' ⏎ ')}")
+        verified, tool = ensure_clipboard_text(text)
+        if verified:
+            print(f"  clipboard verified      held{f' (re-published with {tool})' if tool else ''}")
+        else:
+            print("  clipboard verified      NOT held — the sides disagree:")
+            for name, value in read_clipboard_text_all().items():
+                print(f"    {name:<20} {(value or '(unreadable)').strip()[:40]!r}")
+            for note in paste_notes():
+                print(f"  {note}")
+            return EXIT_FAILURE
+
     preview = _clipboard_preview()
     print(f"  clipboard now           {preview or '(empty or unreadable)'}")
     if not tools:
+        print("\n  no helper can press the key for you — press Ctrl+V yourself.")
         for note in paste_notes():
             print(f"  {note}")
         return EXIT_FAILURE
@@ -605,6 +657,7 @@ def cmd_diagnose(config: Config) -> int:
         paste_keys_for_status,
         paste_notes,
         paste_tools,
+        read_clipboard_text_all,
         uinput_writable,
         usable_tools,
         user_in_input_group,
@@ -628,6 +681,10 @@ def cmd_diagnose(config: Config) -> int:
         print(f"   /dev/uinput writable   {detail}")
         print(f"   input group            {'member' if in_group else 'not a member'}")
     print(f"   verdict                {paste_keys_for_status()}")
+    sides = read_clipboard_text_all()
+    for tool, value in sides.items():
+        shown = (value or "").strip().splitlines()[0][:40] if value else "(unreadable)"
+        print(f"   {tool:<22} {shown or '(empty)'}")
     if not usable_tools():
         problems.append(
             "automatic pasting is not available: the clipboard gets the item, but you must "
@@ -743,7 +800,7 @@ def _main(argv: list[str] | None = None) -> int:
     if args.diagnose:
         return cmd_diagnose(config)
     if args.test_paste:
-        return cmd_test_paste(args.delay)
+        return cmd_test_paste(args.delay, args.item)
 
     if args.status or args.collect_logs or args.list is not None or args.clear:
         store = HistoryStore(config=config)

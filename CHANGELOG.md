@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] — 2026-09-19
+
+### Fixed
+
+- Choosing an item could paste the *previous* clipboard content instead: GTK's
+  clipboard write is asynchronous, and an application that reads the selection
+  too early — X11/XWayland clients such as Java IDEs above all — gets the old
+  payload. The paste shortcut is now sent only after the clipboard has been read
+  back and confirmed to hold the selected item.
+- The item is published on **both** sides of the clipboard. GNOME always runs
+  XWayland and X11 applications read the X11 selection, so when only the Wayland
+  side was written they could keep handing back the stale content; `wl-copy`
+  and `xclip` are both used when needed.
+
+### Added
+
+- `--test-paste --item N` puts the N-th history item (as printed by `--list`) on
+  the clipboard, verifies that both sides hold it, prints the result, and then
+  sends the paste shortcut — a complete check that does not need the window.
+
 ## [2.1.1] — 2026-09-19
 
 ### Added
@@ -239,6 +259,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.1.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.7...v2.1.0
 [2.0.7]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.6...v2.0.7
