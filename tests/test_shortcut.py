@@ -464,3 +464,22 @@ def test_install_reports_the_reload(fake_gsettings):
     assert report.reloaded is None
     report = install(runner=runner, reload_daemon=True)
     assert report.reloaded is not None or any("log out and back in" in message for message in report.messages)
+
+
+def test_daemon_log_is_empty_without_journalctl(monkeypatch):
+    monkeypatch.setattr(shortcut.shutil, "which", lambda _name: None)
+    assert shortcut.daemon_log() == []
+
+
+def test_daemon_log_reads_the_media_keys_unit(monkeypatch):
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def runner(command, **_kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(list(command), 0, b"line one\n-- No entries --\nline two\n", b"")
+
+    monkeypatch.setattr(shortcut.shutil, "which", lambda name: f"/usr/bin/{name}")
+    assert shortcut.daemon_log(runner=runner) == ["line one", "line two"]
+    assert shortcut.MEDIA_KEYS_UNIT in calls[0]

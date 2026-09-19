@@ -55,6 +55,9 @@ RIVAL_CLIPBOARDS = (
 #: ``gsettings`` is a session bus round trip; it can be slow on a loaded machine.
 SET_TIMEOUT = 10.0
 
+#: The systemd user unit that owns the custom keybindings.
+MEDIA_KEYS_UNIT = "org.gnome.SettingsDaemon.MediaKeys"
+
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
@@ -336,6 +339,22 @@ def remove_paths(paths: Sequence[str], runner: Runner = subprocess.run) -> list[
 
 def _disable_shell_conflict(runner: Runner) -> bool:
     return set_value(SHELL_SCHEMA, SHELL_TOGGLE_KEY, "@as []", runner=runner)
+
+
+def daemon_log(lines: int = 15, runner: Runner = subprocess.run) -> list[str]:
+    """Tail of the media-keys plugin log — it says whether a key was registered.
+
+    Empty when ``journalctl`` is missing or has nothing to show.
+    """
+    if shutil.which("journalctl") is None:
+        return []
+    result = _run(["journalctl", "--user", "--no-pager", "-n", str(lines), "-u", MEDIA_KEYS_UNIT], runner)
+    if result is None or result.returncode != 0:
+        return []
+    text = result.stdout.decode("utf-8", errors="replace")
+    lines_out = [line.strip() for line in text.splitlines() if line.strip()]
+    # journalctl's "no entries" placeholder is noise, not evidence.
+    return [line for line in lines_out if line != "-- No entries --"]
 
 
 def status(runner: Runner = subprocess.run) -> dict[str, object]:

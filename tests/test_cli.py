@@ -312,3 +312,34 @@ def test_diagnose_prints_a_checklist(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Win+V diagnosis" in out
     assert "gsettings" in out
+
+
+def test_diagnose_names_the_rival_shortcut_and_process(monkeypatch, capsys):
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/"
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: True)
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.status",
+        lambda: {
+            "registered_paths": [other, cli.KEY_PATH],
+            "ours_listed": True,
+            "name": "'Ubuntu Clipboard'",
+            "command": "'/usr/bin/ubuntu-clipboard --toggle'",
+            "binding": "'<Super>v'",
+        },
+    )
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.get_value", lambda *_a, **_k: f"['{other}', '{cli.KEY_PATH}']"
+    )
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.foreign_bindings", lambda *_a, **_k: [(other, "/usr/bin/diodon")]
+    )
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.daemon_log", lambda *_a, **_k: ["registered <Super>v"])
+    monkeypatch.setattr(
+        "ubuntu_clipboard.cli._process_running", lambda pattern: pattern in {"gsd-media-keys", "diodon"}
+    )
+    assert cli.main(["--diagnose"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert f"{other} (/usr/bin/diodon)" in out
+    assert "in the list" in out and "(ours)" in out
+    assert "another clipboard manager is running: diodon" in out
+    assert "registered <Super>v" in out

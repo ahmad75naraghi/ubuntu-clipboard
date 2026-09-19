@@ -23,6 +23,7 @@ from .config import Config, config_path, database_path, get_config
 from .i18n import set_language, t
 from .log import clear as clear_logs
 from .log import log_path, setup_logging, tail
+from .shortcut import KEY_PATH
 from .storage import HistoryStore
 
 log = logging.getLogger(__name__)
@@ -340,10 +341,24 @@ def _process_running(pattern: str) -> bool | None:
     return result.returncode == 0
 
 
+def _registered_paths() -> list[str]:
+    """Paths currently listed in GNOME's custom keybinding list."""
+    from .shortcut import KEY, SCHEMA, get_value, parse_list
+
+    return parse_list(get_value(SCHEMA, KEY))
+
+
 def cmd_diagnose(config: Config) -> int:
     """Answer "why does Win+V not open the window?" with a checklist."""
     from .app import gtk_available
-    from .shortcut import DEFAULT_BINDING, conflicts, foreign_bindings, gsettings_available
+    from .shortcut import (
+        DEFAULT_BINDING,
+        RIVAL_CLIPBOARDS,
+        conflicts,
+        daemon_log,
+        foreign_bindings,
+        gsettings_available,
+    )
     from .shortcut import status as shortcut_status
 
     print(f"{APP_NAME} {__version__} — Win+V diagnosis")
@@ -378,6 +393,8 @@ def cmd_diagnose(config: Config) -> int:
         command = state_shortcut.get("command")
         listed = bool(state_shortcut.get("ours_listed"))
         print(f"   registered             {'yes' if listed else 'NO — run --install-shortcut'}")
+        for entry in _registered_paths():
+            print(f"   in the list            {entry}{' (ours)' if entry == KEY_PATH else ''}")
         print(f"   binding                {binding or '-'}")
         print(f"   command                {command or '-'}")
         if not listed:
@@ -405,6 +422,12 @@ def cmd_diagnose(config: Config) -> int:
 
         # 4. will the daemon even react?
         print("\n4. the shortcut daemon")
+        running_rivals = [name for name in RIVAL_CLIPBOARDS if _process_running(name)]
+        if running_rivals:
+            print(
+                f"   other clipboard        {chr(44).join(running_rivals)} — quit it, two managers fight over the key"
+            )
+            problems.append("another clipboard manager is running: " + chr(44).join(running_rivals))
         media_keys = _process_running("gsd-media-keys")
         print(
             "   gsd-media-keys         "
@@ -412,6 +435,8 @@ def cmd_diagnose(config: Config) -> int:
         )
         if media_keys is False:
             problems.append("gnome-settings-daemon's media-keys plugin is not running")
+        for line in daemon_log(8):
+            print(f"   log                    {line}")
 
     print("\nsummary")
     if not problems:
