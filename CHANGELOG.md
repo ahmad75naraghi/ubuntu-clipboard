@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] — 2026-09-19
+
+### Added
+
+- `--diagnose`: a checklist that answers "why does Win+V do nothing?" — is GTK
+  installed, is the service running, is the binding registered, does the
+  command still point at an existing program, does another shortcut or the
+  GNOME shell own the key, is `gsd-media-keys` alive — followed by the
+  problems found and the fastest fixes.
+- `--binding KEYS` (with `--install`/`--install-shortcut`): register a
+  different key and remember it in the configuration.
+- After a successful install the shortcut daemon is asked to reload
+  (`systemctl --user restart org.gnome.SettingsDaemon.MediaKeys`, falling back
+  to `pkill -f gsd-media-keys`), because a freshly written keybinding is
+  sometimes only picked up on the next login. The result is reported.
+
 ## [2.0.4] — 2026-09-19
 
 ### Added
@@ -145,6 +161,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.5]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.1...v2.0.2

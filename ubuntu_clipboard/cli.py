@@ -12,11 +12,14 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shlex
+import subprocess
 import sys
 import traceback
+from pathlib import Path
 
 from . import APP_ID, APP_NAME, PROJECT_URL, __version__
-from .config import Config, config_path, get_config
+from .config import Config, config_path, database_path, get_config
 from .i18n import set_language, t
 from .log import clear as clear_logs
 from .log import log_path, setup_logging, tail
@@ -81,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --install/--install-shortcut: also drop other shortcuts using the same key",
     )
+    setup.add_argument(
+        "--binding",
+        metavar="KEYS",
+        help="with --install/--install-shortcut: use another key, e.g. '<Super><Alt>v'",
+    )
 
     diagnostics = parser.add_argument_group("diagnostics")
     diagnostics.add_argument("--status", action="store_true", help="print environment and installation state")
@@ -90,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     diagnostics.add_argument("--clear-logs", action="store_true", help="delete the log files")
     diagnostics.add_argument(
         "--collect-logs", action="store_true", help="write a diagnostic report and print its path"
+    )
+    diagnostics.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="check why Win+V does not open the window and print what to do",
     )
     diagnostics.add_argument("--debug", action="store_true", help="verbose logging on stderr")
 
@@ -115,7 +128,7 @@ ACTION_GROUPS: dict[str, tuple[str, ...]] = {
     "window": APP_COMMANDS,
     "history": ("list", "clear"),
     "integration": ("install", "uninstall", "install_shortcut", "remove_shortcut"),
-    "diagnostics": ("status", "logs", "clear_logs", "collect_logs"),
+    "diagnostics": ("status", "logs", "clear_logs", "collect_logs", "diagnose"),
 }
 
 
@@ -140,6 +153,10 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         getattr(args, "install", False) or getattr(args, "install_shortcut", False)
     ):
         parser.error("--take-binding only makes sense with --install or --install-shortcut")
+    if getattr(args, "binding", None) and not (
+        getattr(args, "install", False) or getattr(args, "install_shortcut", False)
+    ):
+        parser.error("--binding only makes sense with --install or --install-shortcut")
 
 
 # ── local commands ─────────────────────────────────────────────────────────
@@ -283,13 +300,17 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmds_shortcut(install: bool, take_binding: bool = False) -> int:
-    from .shortcut import ShortcutError
+def cmds_shortcut(install: bool, take_binding: bool = False, binding: str | None = None) -> int:
+    from .shortcut import DEFAULT_BINDING, ShortcutError
     from .shortcut import install as shortcut_install
     from .shortcut import uninstall as shortcut_uninstall
 
     try:
-        report = shortcut_install(take_binding=take_binding) if install else shortcut_uninstall()
+        report = (
+            shortcut_install(binding=binding or DEFAULT_BINDING, take_binding=take_binding)
+            if install
+            else shortcut_uninstall()
+        )
     except ShortcutError as exc:
         print(f"  ! {exc}", file=sys.stderr)
         return EXIT_FAILURE
@@ -305,6 +326,105 @@ def cmds_shortcut(install: bool, take_binding: bool = False) -> int:
             file=sys.stderr,
         )
         return EXIT_FAILURE
+    return EXIT_OK
+
+
+def _process_running(pattern: str) -> bool | None:
+    """Whether a process matching ``pattern`` is running (``None`` = cannot tell)."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", pattern], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+        )
+    except OSError:  # pragma: no cover - no pgrep
+        return None
+    return result.returncode == 0
+
+
+def cmd_diagnose(config: Config) -> int:
+    """Answer "why does Win+V not open the window?" with a checklist."""
+    from .app import gtk_available
+    from .shortcut import DEFAULT_BINDING, conflicts, foreign_bindings, gsettings_available
+    from .shortcut import status as shortcut_status
+
+    print(f"{APP_NAME} {__version__} — Win+V diagnosis")
+    problems: list[str] = []
+
+    # 1. is the application itself healthy?
+    print("\n1. the application")
+    gtk = gtk_available()
+    print(f"   GTK 4 available        {'yes' if gtk else 'NO — install python3-gi gir1.2-gtk-4.0'}")
+    if not gtk:
+        problems.append("GTK 4 is missing, so no window can be opened")
+    state = is_running()
+    if state is None:
+        print("   running instance       unknown (no session bus)")
+    else:
+        print(f"   running instance       {'yes' if state else 'no — start it with --background'}")
+    if state is False:
+        problems.append("the background service is not running")
+    print(f"   database               {database_path()}")
+    print(f"   configuration          {config_path()}")
+
+    # 2. is the keybinding registered?
+    print("\n2. the keybinding (org.gnome.settings-daemon.plugins.media-keys)")
+    if not gsettings_available():
+        print("   gsettings              not found — this is not a GNOME session")
+        problems.append("gsettings is unavailable, so no shortcut can be registered")
+        wanted = config.shortcut or DEFAULT_BINDING
+    else:
+        state_shortcut = shortcut_status()
+        wanted = config.shortcut or DEFAULT_BINDING
+        binding = state_shortcut.get("binding")
+        command = state_shortcut.get("command")
+        listed = bool(state_shortcut.get("ours_listed"))
+        print(f"   registered             {'yes' if listed else 'NO — run --install-shortcut'}")
+        print(f"   binding                {binding or '-'}")
+        print(f"   command                {command or '-'}")
+        if not listed:
+            problems.append("our shortcut is not in the GNOME keybinding list")
+        if binding and binding.strip("'") != wanted:
+            print(f"   note                   the configured key is {wanted!r}")
+        if command:
+            program = shlex.split(command.strip("'"))[0] if command.strip("'") else ""
+            if program and not Path(program).exists():
+                print(f"   command exists         NO — {program} is gone")
+                problems.append("the shortcut runs a program that no longer exists")
+
+        # 3. does anything else own the key?
+        print("\n3. other owners of the same key")
+        clashing = foreign_bindings(wanted)
+        for path, other in clashing:
+            print(f"   other shortcut         {path} ({other or 'no command'})")
+        if clashing:
+            problems.append(
+                "another custom shortcut uses the same key — "
+                "remove it with --take-binding or in Settings → Keyboard"
+            )
+        shell = (conflicts(wanted) or [None])[0]
+        print(f"   GNOME shell            {shell or 'free'}")
+
+        # 4. will the daemon even react?
+        print("\n4. the shortcut daemon")
+        media_keys = _process_running("gsd-media-keys")
+        print(
+            "   gsd-media-keys         "
+            + {True: "running", False: "NOT running — restart it or log out", None: "unknown"}[media_keys]
+        )
+        if media_keys is False:
+            problems.append("gnome-settings-daemon's media-keys plugin is not running")
+
+    print("\nsummary")
+    if not problems:
+        print("   everything checks out — press Win+V. If nothing appears, the key is")
+        print("   being handled elsewhere: log out and back in once, then try again.")
+    else:
+        for index, problem in enumerate(problems, start=1):
+            print(f"   {index}. {problem}")
+        print("\n   fastest fixes:")
+        print("     ubuntu-clipboard --install-shortcut --take-binding")
+        print("     systemctl --user restart org.gnome.SettingsDaemon.MediaKeys")
+        print("     ubuntu-clipboard --install-shortcut --binding '<Super><Alt>v'")
+    print("\nfull report for a bug report: ubuntu-clipboard --collect-logs")
     return EXIT_OK
 
 
@@ -371,8 +491,15 @@ def _main(argv: list[str] | None = None) -> int:
     config = get_config()
     set_language(config.language)
 
+    if args.binding:
+        config.shortcut = args.binding
+        config.save()
     if args.install_shortcut or args.remove_shortcut:
-        return cmds_shortcut(install=args.install_shortcut, take_binding=args.take_binding)
+        return cmds_shortcut(
+            install=args.install_shortcut,
+            take_binding=args.take_binding,
+            binding=args.binding or config.shortcut,
+        )
     if args.install:
         return cmd_install(args, config)
     if args.uninstall:
@@ -385,6 +512,9 @@ def _main(argv: list[str] | None = None) -> int:
     if args.logs is not None:
         print(tail(max(1, args.logs)))
         return EXIT_OK
+
+    if args.diagnose:
+        return cmd_diagnose(config)
 
     if args.status or args.collect_logs or args.list is not None or args.clear:
         store = HistoryStore(config=config)

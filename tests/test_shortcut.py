@@ -418,3 +418,49 @@ def test_remove_paths_is_a_no_op_for_unknown_paths(fake_gsettings):
     fake = fake_gsettings({f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{shortcut.KEY_PATH}']"})
     assert shortcut.remove_paths(["/org/gnome/.../nope/"], runner=fake) == []
     assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == f"['{shortcut.KEY_PATH}']"
+
+
+def test_refresh_media_keys_prefers_systemctl():
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def runner(command, **_kwargs):
+        calls.append(list(command))
+        return subprocess.CompletedProcess(list(command), 0, b"", b"")
+
+    message = shortcut.refresh_media_keys(runner=runner, which=lambda name: f"/usr/bin/{name}")
+    assert "reloaded" in message
+    assert calls[0][:3] == ["systemctl", "--user", "restart"]
+
+
+def test_refresh_media_keys_falls_back_to_pkill():
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def runner(command, **_kwargs):
+        calls.append(list(command))
+        if command[0] == "systemctl":
+            return subprocess.CompletedProcess(list(command), 1, b"", b"failed")
+        return subprocess.CompletedProcess(list(command), 0, b"", b"")
+
+    message = shortcut.refresh_media_keys(runner=runner, which=lambda name: f"/usr/bin/{name}")
+    assert "gsd-media-keys" in message
+    assert [call[0] for call in calls] == ["systemctl", "pkill"]
+
+
+def test_refresh_media_keys_reports_failure_without_tools():
+    assert shortcut.refresh_media_keys(runner=lambda *_a, **_k: None, which=lambda _n: None) is None
+
+
+def test_install_reports_the_reload(fake_gsettings):
+    fake = fake_gsettings()
+
+    def runner(command, **kwargs):
+        return fake(command, **kwargs)
+
+    report = install(runner=runner, reload_daemon=False)
+    assert report.reloaded is None
+    report = install(runner=runner, reload_daemon=True)
+    assert report.reloaded is not None or any("log out and back in" in message for message in report.messages)

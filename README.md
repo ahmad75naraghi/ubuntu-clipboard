@@ -2,7 +2,7 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.4-blue)
+![Version](https://img.shields.io/badge/version-2.0.5-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
@@ -160,6 +160,9 @@ ubuntu-clipboard [options]
 | `--install-shortcut` / `--remove-shortcut` | فقط میانبر Win+V |
 | `--take-binding` | همراه `--install` یا `--install-shortcut`: میانبرهای دیگری که
 همان کلید را گرفته‌اند هم حذف شوند |
+| `--binding KEYS` | همراه `--install` یا `--install-shortcut`: استفاده از کلید دیگر و
+ذخیرهٔ آن در تنظیمات |
+| `--diagnose` | بررسی گام‌به‌گام اینکه چرا Win+V پنجره را باز نمی‌کند |
 | `--status` | وضعیت کامل محیط، دیتابیس، میان‌بر و سرویس |
 | `--logs [N]` | چاپ N خط آخر لاگ (پیش‌فرض ۲۰۰) |
 | `--clear-logs` | پاک کردن فایل‌های لاگ |
@@ -169,7 +172,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.4
+Ubuntu Clipboard 2.0.5
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -329,10 +332,15 @@ make run         # python3 -m ubuntu_clipboard --toggle
 **Win+V کار نمی‌کند؟**
 
 ```bash
+ubuntu-clipboard --diagnose             # چک‌لیست کامل: برنامه، میانبر، تداخل‌ها، دیمن
 ubuntu-clipboard --install-shortcut     # ثبت مجدد میانبر (و هشدار تداخل‌ها)
 ubuntu-clipboard --status               # بررسی خط «shortcut»
 gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 ```
+
+`--diagnose` همهٔ پیش‌نیازها را یکی‌یکی بررسی می‌کند: نصب بودن GTK 4، در حال اجرا بودن
+سرویس، ثبت بودن میانبر، وجود فایل فرمان، تداخل با میانبرهای دیگر یا میانبر پوستهٔ گنوم،
+و زنده بودن `gsd-media-keys`. در پایان فهرست مشکلات و سریع‌ترین راه‌حل‌ها را چاپ می‌کند.
 
 اگر میانبر دیگری هم روی همان کلید باشد، `--install-shortcut` هشدار می‌دهد و مسیر و
 فرمان آن را چاپ می‌کند (آن میانبر را دست نمی‌زنیم چون مال شماست)؛ در

@@ -282,3 +282,33 @@ def test_take_binding_is_forwarded_to_the_shortcut_installer(monkeypatch):
     monkeypatch.setattr("ubuntu_clipboard.shortcut.install", fake_install)
     assert cli.main(["--install-shortcut", "--take-binding"]) == cli.EXIT_OK
     assert seen["take_binding"] is True
+
+
+def test_binding_needs_an_install_command():
+    with pytest.raises(SystemExit) as info:
+        cli.main(["--binding", "<Super><Alt>v"])
+    assert info.value.code == 2
+
+
+def test_binding_is_saved_and_used(monkeypatch, capsys):
+    seen = {}
+
+    def fake_install(*, binding=None, launch_command=None, take_binding=False):
+        from ubuntu_clipboard.shortcut import Report as ShortcutReport
+
+        seen["binding"] = binding
+        return ShortcutReport(ok=True, binding=binding or "<Super>v")
+
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.install", fake_install)
+    assert cli.main(["--install-shortcut", "--binding", "<Super><Alt>v"]) == cli.EXIT_OK
+    assert seen["binding"] == "<Super><Alt>v"
+    assert Config.load().shortcut == "<Super><Alt>v"  # persisted for the next install
+
+
+def test_diagnose_prints_a_checklist(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.cli.is_running", lambda: True)
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: False)
+    assert cli.main(["--diagnose"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "Win+V diagnosis" in out
+    assert "gsettings" in out

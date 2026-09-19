@@ -75,6 +75,8 @@ class Report:
     clashing: list[str] = field(default_factory=list)
     #: Paths we removed because the caller asked for the binding (``--take-binding``).
     took: list[str] = field(default_factory=list)
+    #: What the shortcut daemon reload reported, if it was asked to reload.
+    reloaded: str | None = None
     messages: list[str] = field(default_factory=list)
 
     def add(self, message: str) -> None:
@@ -276,6 +278,51 @@ def custom_conflicts(binding: str = DEFAULT_BINDING, runner: Runner = subprocess
     return [describe_foreign(path, command) for path, command in foreign_bindings(binding, runner)]
 
 
+def media_keys_units() -> tuple[str, ...]:
+    """systemd user units that own GNOME's keyboard shortcuts."""
+    return ("org.gnome.SettingsDaemon.MediaKeys", "org.gnome.SettingsDaemon.Keyboard")
+
+
+def refresh_media_keys(
+    runner: Runner = subprocess.run,
+    which: Callable[[str], str | None] | None = None,
+) -> str | None:
+    """Ask the shortcut daemon to reload, so the new key works immediately.
+
+    ``gnome-settings-daemon`` watches the keybinding list, but in practice a
+    freshly written binding is sometimes ignored until the plugin restarts;
+    restarting it avoids a log out. Returns what happened, or ``None``.
+    """
+    finder = which or shutil.which
+    if finder("systemctl"):
+        unit = media_keys_units()[0]
+        try:
+            result = runner(
+                ["systemctl", "--user", "restart", unit],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=SET_TIMEOUT,
+                check=False,
+            )
+            if result is not None and result.returncode == 0:
+                return f"reloaded {unit}"
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.debug("systemctl could not restart %s: %s", unit, exc)
+    if finder("pkill"):
+        try:
+            runner(
+                ["pkill", "-f", "gsd-media-keys"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=SET_TIMEOUT,
+                check=False,
+            )
+            return "restarted gsd-media-keys (the shell starts it again)"
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.debug("pkill failed: %s", exc)
+    return None
+
+
 def remove_paths(paths: Sequence[str], runner: Runner = subprocess.run) -> list[str]:
     """Drop ``paths`` from the keybinding list; returns the ones that were there."""
     registered = parse_list(get_value(SCHEMA, KEY, runner=runner))
@@ -311,6 +358,7 @@ def install(
     runner: Runner = subprocess.run,
     unbind_conflicts: bool = True,
     take_binding: bool = False,
+    reload_daemon: bool = True,
 ) -> Report:
     """Register ``Win+V`` for this application. Idempotent.
 
@@ -383,6 +431,15 @@ def install(
             report.add(
                 f"warning: {rival} is another clipboard manager — only one of them can "
                 "own the key, and running two is not useful"
+            )
+    if reload_daemon:
+        report.reloaded = refresh_media_keys(runner)
+        if report.reloaded:
+            report.add(report.reloaded)
+        else:
+            report.add(
+                "warning: could not reload the shortcut daemon — if the key does nothing, "
+                "log out and back in once"
             )
     return report
 
