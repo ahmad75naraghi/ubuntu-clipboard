@@ -262,3 +262,23 @@ def test_unexpected_errors_are_reported_not_raised(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "boom" in captured.err
     assert "ubuntu-clipboard --logs" in captured.err
+
+
+def test_take_binding_needs_an_install_command():
+    with pytest.raises(SystemExit) as info:
+        cli.main(["--take-binding"])
+    assert info.value.code == 2
+
+
+def test_take_binding_is_forwarded_to_the_shortcut_installer(monkeypatch):
+    from ubuntu_clipboard.shortcut import Report as ShortcutReport
+
+    seen = {}
+
+    def fake_install(*, binding=None, launch_command=None, take_binding=False):
+        seen["take_binding"] = take_binding
+        return ShortcutReport(ok=True, binding=binding or "<Super>v")
+
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.install", fake_install)
+    assert cli.main(["--install-shortcut", "--take-binding"]) == cli.EXIT_OK
+    assert seen["take_binding"] is True

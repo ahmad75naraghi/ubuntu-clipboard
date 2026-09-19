@@ -243,6 +243,7 @@ def install_all(
     enable_startup: bool = True,
     shortcut_binding: str = DEFAULT_BINDING,
     install_keybinding: bool = True,
+    take_binding: bool = False,
 ) -> Report:
     """Install every user level integration piece."""
     report = Report()
@@ -269,7 +270,9 @@ def install_all(
 
     if install_keybinding:
         try:
-            result = install_shortcut(binding=shortcut_binding, launch_command=command)
+            result = install_shortcut(
+                binding=shortcut_binding, launch_command=command, take_binding=take_binding
+            )
             report.shortcut = result
             for message in result.messages:
                 if result.ok and not message.startswith("warning:"):

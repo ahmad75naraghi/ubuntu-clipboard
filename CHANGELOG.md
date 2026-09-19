@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] — 2026-09-19
+
+### Added
+
+- `--take-binding` (with `--install` or `--install-shortcut`): removes the
+  *other* custom shortcuts that already use our key. Without it those entries
+  stay untouched (they belong to the user) and are only reported.
+- The conflict warning now names known clipboard managers (`diodon`, `copyq`,
+  `clipit`, `parcellite`, `gpaste`, `clipman`, `cliphist`, `greenclip`) so the
+  usual reason Win+V "does nothing" is obvious: another clipboard manager holds
+  the key. `shortcut.foreign_bindings()`, `describe_foreign()` and
+  `remove_paths()` are the building blocks; `Report.took` lists what was
+  removed.
+
 ## [2.0.3] — 2026-09-19
 
 ### Added
@@ -131,6 +145,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.4]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.3...v2.0.4
 [2.0.3]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.0...v2.0.1

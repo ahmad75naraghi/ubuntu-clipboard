@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     setup.add_argument("--install-shortcut", action="store_true", help="register the Win+V keybinding")
     setup.add_argument("--remove-shortcut", action="store_true", help="remove the Win+V keybinding")
+    setup.add_argument(
+        "--take-binding",
+        action="store_true",
+        help="with --install/--install-shortcut: also drop other shortcuts using the same key",
+    )
 
     diagnostics = parser.add_argument_group("diagnostics")
     diagnostics.add_argument("--status", action="store_true", help="print environment and installation state")
@@ -131,6 +136,10 @@ def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> 
         parser.error("--all only makes sense together with --clear")
     if getattr(args, "purge", False) and not getattr(args, "uninstall", False):
         parser.error("--purge only makes sense together with --uninstall")
+    if getattr(args, "take_binding", False) and not (
+        getattr(args, "install", False) or getattr(args, "install_shortcut", False)
+    ):
+        parser.error("--take-binding only makes sense with --install or --install-shortcut")
 
 
 # ── local commands ─────────────────────────────────────────────────────────
@@ -247,13 +256,14 @@ def cmd_collect_logs(store: HistoryStore) -> int:
     return EXIT_OK
 
 
-def cmd_install(_args: argparse.Namespace, config: Config) -> int:
+def cmd_install(args: argparse.Namespace, config: Config) -> int:
     from .install import install_all
 
     report = install_all(
         enable_startup=config.auto_start,
         shortcut_binding=config.shortcut,
         install_keybinding=True,
+        take_binding=args.take_binding,
     )
     for action in report.actions:
         print(f"  ✓ {action}")
@@ -273,13 +283,13 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmds_shortcut(install: bool) -> int:
+def cmds_shortcut(install: bool, take_binding: bool = False) -> int:
     from .shortcut import ShortcutError
     from .shortcut import install as shortcut_install
     from .shortcut import uninstall as shortcut_uninstall
 
     try:
-        report = shortcut_install() if install else shortcut_uninstall()
+        report = shortcut_install(take_binding=take_binding) if install else shortcut_uninstall()
     except ShortcutError as exc:
         print(f"  ! {exc}", file=sys.stderr)
         return EXIT_FAILURE
@@ -362,7 +372,7 @@ def _main(argv: list[str] | None = None) -> int:
     set_language(config.language)
 
     if args.install_shortcut or args.remove_shortcut:
-        return cmds_shortcut(install=args.install_shortcut)
+        return cmds_shortcut(install=args.install_shortcut, take_binding=args.take_binding)
     if args.install:
         return cmd_install(args, config)
     if args.uninstall:

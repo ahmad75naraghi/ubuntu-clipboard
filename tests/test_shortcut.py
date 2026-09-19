@@ -348,8 +348,73 @@ def test_install_warns_about_the_users_shortcut_but_succeeds(fake_gsettings):
     assert report.ok is True
     assert report.clashing and "custom0" in report.clashing[0]
     assert any(
-        message.startswith("warning:") and "already uses <Super>v" in message for message in report.messages
+        message.startswith("warning:") and "also answers to <Super>v" in message
+        for message in report.messages
     )
     # the user's entry must be untouched, and still registered
     assert fake.values[f"{shortcut.CHILD_SCHEMA}:{other}|binding"] == "'<Super>v'"
     assert other in fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"]
+
+
+def test_foreign_bindings_lists_path_and_command(fake_gsettings):
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>v'",
+            f"{shortcut.CHILD_SCHEMA}:{other}|command": "'/usr/bin/diodon'",
+        }
+    )
+    assert shortcut.foreign_bindings(runner=fake) == [(other, "/usr/bin/diodon")]
+
+
+def test_rival_name_spots_the_other_clipboard_manager():
+    assert shortcut.rival_name("/usr/bin/diodon") == "diodon"
+    assert shortcut.rival_name("copyq show") == "copyq"
+    assert shortcut.rival_name("/usr/bin/gedit") is None
+    assert shortcut.describe_foreign("/org/.../custom1/", "/usr/bin/diodon") == (
+        "/org/.../custom1/ (/usr/bin/diodon)"
+    )
+
+
+def test_install_keeps_a_foreign_binding_unless_asked(fake_gsettings):
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>v'",
+            f"{shortcut.CHILD_SCHEMA}:{other}|command": "'/usr/bin/diodon'",
+        }
+    )
+    report = install(runner=fake)
+    assert report.ok is True
+    assert report.took == []
+    assert other in fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"]
+    assert any("--take-binding" in message for message in report.messages)
+
+
+def test_take_binding_removes_the_foreign_shortcut(fake_gsettings):
+    """diodon-style shortcut: the user asks for the key, so it goes away."""
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>v'",
+            f"{shortcut.CHILD_SCHEMA}:{other}|command": "'/usr/bin/diodon'",
+        }
+    )
+    report = install(runner=fake, take_binding=True)
+    assert report.ok is True
+    assert report.took == [other]
+    assert report.clashing == []
+    registered = fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"]
+    assert other not in registered
+    assert shortcut.KEY_PATH in registered
+    # the foreign shortcut keeps its own values, it is only unregistered
+    assert fake.values[f"{shortcut.CHILD_SCHEMA}:{other}|binding"] == "'<Super>v'"
+
+
+def test_remove_paths_is_a_no_op_for_unknown_paths(fake_gsettings):
+    fake = fake_gsettings({f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{shortcut.KEY_PATH}']"})
+    assert shortcut.remove_paths(["/org/gnome/.../nope/"], runner=fake) == []
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == f"['{shortcut.KEY_PATH}']"

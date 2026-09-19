@@ -2,7 +2,7 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.3-blue)
+![Version](https://img.shields.io/badge/version-2.0.4-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
@@ -158,6 +158,8 @@ ubuntu-clipboard [options]
 | `--uninstall` | حذف یکپارچگی دسکتاپ (تاریخچه می‌ماند) |
 | `--purge` | همراه `--uninstall`: حذف دیتابیس و تنظیمات |
 | `--install-shortcut` / `--remove-shortcut` | فقط میانبر Win+V |
+| `--take-binding` | همراه `--install` یا `--install-shortcut`: میانبرهای دیگری که
+همان کلید را گرفته‌اند هم حذف شوند |
 | `--status` | وضعیت کامل محیط، دیتابیس، میان‌بر و سرویس |
 | `--logs [N]` | چاپ N خط آخر لاگ (پیش‌فرض ۲۰۰) |
 | `--clear-logs` | پاک کردن فایل‌های لاگ |
@@ -167,7 +169,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.3
+Ubuntu Clipboard 2.0.4
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -334,7 +336,17 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 
 اگر میانبر دیگری هم روی همان کلید باشد، `--install-shortcut` هشدار می‌دهد و مسیر و
 فرمان آن را چاپ می‌کند (آن میانبر را دست نمی‌زنیم چون مال شماست)؛ در
-**Settings → Keyboard → Custom Shortcuts** آن را حذف یا جابه‌جا کنید.
+**Settings → Keyboard → Custom Shortcuts** آن را حذف یا جابه‌جا کنید، یا صریحاً بگویید
+که کلید را بردارد:
+
+```bash
+ubuntu-clipboard --take-binding --install-shortcut
+```
+
+> اگر میانبر متداخل مربوط به یک **کلیپ‌بورد منیجر دیگر** باشد (مثل `diodon`)، پیام
+> هشدار نام آن را هم می‌گوید. آن برنامه‌ها میانبر داخلی ندارند و فقط با یک
+> Custom Shortcut روی `<Super>v` می‌نشینند؛ دو کلیپ‌بورد منیجر با هم لازم نیست —
+> یکی را بردارید یا کلید دیگری به آن بدهید.
 
 اگر میانبر دیگری روی `<Super>v` باشد، `--install-shortcut` آن را غیرفعال می‌کند و
 هشدار می‌دهد. ممکن است لازم باشد یک بار از حساب خارج و دوباره وارد شوید.

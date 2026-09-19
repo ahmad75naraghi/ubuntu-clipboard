@@ -38,6 +38,20 @@ SHELL_TOGGLE_KEY = "toggle-message-tray"
 
 #: Commands that mean "this binding belongs to us".
 OWNED_MARKERS = ("ubuntu-clipboard", "ubuntu_clipboard")
+#: Clipboard managers that are regularly bound to the same key (diodon ships no
+#: hotkey of its own, but every tutorial tells users to make a custom shortcut
+#: for it, usually <Super>v).
+RIVAL_CLIPBOARDS = (
+    "diodon",
+    "copyq",
+    "clipit",
+    "parcellite",
+    "gpaste",
+    "clipman",
+    "cliphist",
+    "greenclip",
+    "clipboard-indicator",
+)
 #: ``gsettings`` is a session bus round trip; it can be slow on a loaded machine.
 SET_TIMEOUT = 10.0
 
@@ -59,6 +73,8 @@ class Report:
     disabled: list[str] = field(default_factory=list)
     #: The user's own shortcuts that already use our binding (we never edit them).
     clashing: list[str] = field(default_factory=list)
+    #: Paths we removed because the caller asked for the binding (``--take-binding``).
+    took: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
 
     def add(self, message: str) -> None:
@@ -226,21 +242,49 @@ def unquote(value: str | None) -> str:
     return text
 
 
-def custom_conflicts(binding: str = DEFAULT_BINDING, runner: Runner = subprocess.run) -> list[str]:
-    """Other custom shortcuts (someone else's) already bound to ``binding``.
+def foreign_bindings(
+    binding: str = DEFAULT_BINDING, runner: Runner = subprocess.run
+) -> list[tuple[str, str]]:
+    """``(path, command)`` of the user's own shortcuts that already use ``binding``.
 
-    They are never edited: they belong to the user. The caller only warns, so
-    the reason Win+V seems to do nothing is visible instead of mysterious.
+    The desktop environment runs whichever of the two it reaches first, so one
+    of them never fires — usually the reason "Win+V does nothing".
     """
-    found: list[str] = []
+    found: list[tuple[str, str]] = []
     for path in parse_list(get_value(SCHEMA, KEY, runner=runner)):
         if path == KEY_PATH:
             continue
         if unquote(get_value(CHILD_SCHEMA, "binding", path, runner)) != binding:
             continue
-        command = unquote(get_value(CHILD_SCHEMA, "command", path, runner))
-        found.append(f"{path} ({command})" if command else path)
+        found.append((path, unquote(get_value(CHILD_SCHEMA, "command", path, runner))))
     return found
+
+
+def describe_foreign(path: str, command: str) -> str:
+    """Human readable description of a conflicting shortcut."""
+    return f"{path} ({command})" if command else path
+
+
+def rival_name(command: str) -> str | None:
+    """Name of the other clipboard manager behind ``command``, if it is one."""
+    lowered = command.lower()
+    return next((name for name in RIVAL_CLIPBOARDS if name in lowered), None)
+
+
+def custom_conflicts(binding: str = DEFAULT_BINDING, runner: Runner = subprocess.run) -> list[str]:
+    """Other custom shortcuts (someone else's) already bound to ``binding``."""
+    return [describe_foreign(path, command) for path, command in foreign_bindings(binding, runner)]
+
+
+def remove_paths(paths: Sequence[str], runner: Runner = subprocess.run) -> list[str]:
+    """Drop ``paths`` from the keybinding list; returns the ones that were there."""
+    registered = parse_list(get_value(SCHEMA, KEY, runner=runner))
+    keep = [path for path in registered if path not in set(paths)]
+    removed = [path for path in registered if path in set(paths)]
+    if removed and not set_value(SCHEMA, KEY, format_list(keep), runner=runner):
+        log.warning("could not remove %s from %s", removed, KEY)
+        return []
+    return removed
 
 
 def _disable_shell_conflict(runner: Runner) -> bool:
@@ -266,8 +310,14 @@ def install(
     launch_command: Sequence[str] | None = None,
     runner: Runner = subprocess.run,
     unbind_conflicts: bool = True,
+    take_binding: bool = False,
 ) -> Report:
-    """Register ``Win+V`` for this application. Idempotent."""
+    """Register ``Win+V`` for this application. Idempotent.
+
+    ``take_binding`` also removes *other* custom shortcuts that already use
+    the same key. They are the user's, so this only happens on request
+    (``--take-binding``).
+    """
     report = Report(binding=binding)
     binary = list(launch_command) if launch_command else resolve_launch_command()
     report.command = shlex.join([*binary, "--toggle"])
@@ -314,12 +364,26 @@ def install(
         report.add("removed duplicate bindings: " + ", ".join(report.removed))
     report.ok = True
     report.add(f"shortcut {binding} -> {report.command}")
-    report.clashing = custom_conflicts(binding, runner)
-    for clash in report.clashing:
-        report.add(
-            f"warning: {clash} already uses {binding} and may win — "
-            "remove it in Settings → Keyboard → Custom Shortcuts"
+    foreign = foreign_bindings(binding, runner)
+    if foreign and take_binding:
+        for path in remove_paths([path for path, _command in foreign], runner):
+            report.took.append(path)
+            report.add(f"took {binding} over from {path}")
+        foreign = foreign_bindings(binding, runner)
+    report.clashing = [describe_foreign(path, command) for path, command in foreign]
+    for path, command in foreign:
+        message = (
+            f"warning: {describe_foreign(path, command)} also answers to {binding} and may "
+            "win — remove that shortcut with --take-binding, or in "
+            "Settings → Keyboard → Custom Shortcuts"
         )
+        report.add(message)
+        rival = rival_name(command)
+        if rival:
+            report.add(
+                f"warning: {rival} is another clipboard manager — only one of them can "
+                "own the key, and running two is not useful"
+            )
     return report
 
 
