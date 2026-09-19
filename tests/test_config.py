@@ -47,6 +47,7 @@ def test_defaults_are_valid():
     assert config.theme == "system"
     assert config.language == "fa"
     assert config.keep_pinned_on_clear is True
+    assert config.hide_from_dock is True
 
 
 def test_out_of_range_values_are_clamped(caplog):
@@ -193,3 +194,20 @@ def test_byte_limits(config):
 
 def test_legacy_database_constant_used_for_migration(isolated_home):
     assert config_module.LEGACY_DB_NAME == "history.db"
+
+
+def test_hide_from_dock_survives_a_round_trip(tmp_path):
+    config = Config(hide_from_dock=False)
+    config.save()
+    assert Config.load().hide_from_dock is False
+
+
+def test_an_unknown_config_key_does_not_break_loading(tmp_path):
+    """Files written by an older or newer version must still load."""
+    config = Config()
+    config.save()
+    path = config_path()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["something_from_the_future"] = True
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert Config.load().hide_from_dock is True

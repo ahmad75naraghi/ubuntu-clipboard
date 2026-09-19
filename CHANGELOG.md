@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.3] — 2026-09-19
+
+### Added
+
+- The popup stays out of the Ubuntu dock and the window list. GNOME gives a
+  Wayland client no way to skip the taskbar, so — with the new `hide_from_dock`
+  setting on — the window is started on the X11 (XWayland) backend, where
+  `_NET_WM_STATE_SKIP_TASKBAR` is honoured, and the hint is applied when the
+  window is mapped. `UBUNTU_CLIPBOARD_BACKEND=x11|wayland` overrides the choice,
+  and `--status`/`--diagnose` print which backend is in use.
+
+### Fixed
+
+- Choosing an item made the window blink open and shut. Focus was handed back to
+  the previous window *before* the clipboard was verified, so that focus change
+  hid the popup again; if the user reopened it meanwhile, the two kept fighting
+  each other until the paste finally landed. A pending paste is now cancelled as
+  soon as the window is opened again, and focus only moves after the clipboard is
+  ready.
+- Pasting is much faster when an X11 reader disagrees with the Wayland side: the
+  mismatching side is re-published immediately instead of waiting out the full
+  500 ms verification window (measured: ~12 ms instead of ~500 ms).
+- Windows keep their identity on the X11 backend: GTK builds `WM_CLASS` from the
+  program name, so a `python3 -m ubuntu_clipboard` launch used to look like
+  "Python 3" to GNOME. The program name is now the application id — the value
+  the desktop entry already declares as `StartupWMClass` — so the windows are
+  recognised as Ubuntu Clipboard (the icon and name stay right even with
+  `hide_from_dock` turned off, and for the settings window).
+- Passwords are still filtered out on the XWayland backend. The
+  `x-kde-passwordManagerHint` marker lives only on the Wayland side of the
+  clipboard, so it never reaches a GDK client reading the X11 selection; the
+  Wayland side is now asked directly (`wl-paste --list-types`, one short-lived
+  process per copy, only in that configuration) before anything is stored.
+- Focus is no longer given back by hand on a Wayland session. `_NET_ACTIVE_WINDOW`
+  can point at the last *X11* window that had focus, so activating it would have
+  moved the paste into an application the user had left; mutter already returns
+  focus to the previously focused window.
+
 ## [2.1.2] — 2026-09-19
 
 ### Fixed
@@ -259,6 +297,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.1.3]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.7...v2.1.0

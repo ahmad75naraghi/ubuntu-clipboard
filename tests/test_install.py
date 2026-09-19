@@ -181,3 +181,11 @@ def test_install_reports_a_missing_gsettings(isolated_home, monkeypatch):
     monkeypatch.setattr("ubuntu_clipboard.install.install_shortcut", explode)
     report = install.install_all()
     assert any("not a GNOME session" in warning for warning in report.warnings)
+
+
+def test_the_desktop_entry_declares_the_same_wm_class_as_the_application():
+    """Both sides of the X11 window matching come from the same constant."""
+    from ubuntu_clipboard import APP_ID
+
+    text = install.desktop_entry_text(["/usr/bin/python3", "-m", "ubuntu_clipboard"])
+    assert f"StartupWMClass={APP_ID}" in text

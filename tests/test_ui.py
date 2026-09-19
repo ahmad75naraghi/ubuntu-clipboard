@@ -468,3 +468,18 @@ def test_confirm_without_libadwaita(ui, monkeypatch):
     monkeypatch.setattr(ui.dialogs_module, "Adw", None)
     FakeMessageDialog.auto_response = "accept"
     assert ui.dialogs_module.confirm(None, "title", "body") is True
+
+
+def test_dock_hints_are_optional_and_safe_without_x11(ui):
+    """The double has no GdkX11: the hint must fail quietly, never raise."""
+    window = ui.window
+    assert window.apply_dock_hints() is False
+    ui.app.config.hide_from_dock = False
+    assert window.apply_dock_hints() is False
+
+
+def test_map_applies_the_dock_hint(ui, monkeypatch):
+    called: list[bool] = []
+    monkeypatch.setattr(ui.window, "apply_dock_hints", lambda: called.append(True) or False)
+    ui.window._on_mapped()
+    assert called == [True]

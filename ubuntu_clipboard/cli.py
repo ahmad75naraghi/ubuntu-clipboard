@@ -268,6 +268,7 @@ def cmd_status(store: HistoryStore) -> int:
     instance_state = {True: "running", False: "stopped", None: "unknown"}[is_running()]
     print(f"  instance         {instance_state}")
     print(f"  auto paste       {paste_keys_for_status()}")
+    print(f"  window backend   {display_backend_label()}")
     tools = report["tools"]
     print(
         "  tools            "
@@ -667,6 +668,7 @@ def cmd_diagnose(config: Config) -> int:
     session = detect_session()
     print(f"\n{section}. pasting into the focused window")
     print(f"   session                {session}")
+    print(f"   window backend         {display_backend_label()}")
     print(f"   helpers installed      {', '.join(paste_tools()) or 'none'}")
     print(f"   helpers that can paste {', '.join(usable_tools()) or 'none'}")
     if "ydotool" in paste_tools():
@@ -710,14 +712,59 @@ def cmd_diagnose(config: Config) -> int:
     return EXIT_OK
 
 
+#: Set to ``wayland`` or ``x11`` to override the backend decision.
+BACKEND_ENV = "UBUNTU_CLIPBOARD_BACKEND"
+
+
+def display_backend(hide_from_dock: bool | None = None) -> str:
+    """The display backend the windowed application will use.
+
+    GNOME exposes no way for a Wayland client to skip the taskbar, so a Wayland
+    window always shows up in the dock while it is open. XWayland honours
+    ``_NET_WM_STATE_SKIP_TASKBAR``, so a popup that should stay out of the dock
+    is started on the X11 backend — still inside the Wayland session, just
+    through XWayland, which is what the ``hide_from_dock`` setting controls.
+    """
+    from .clipboard import detect_session
+
+    requested = os.environ.get(BACKEND_ENV, "auto").strip().lower()
+    if requested in {"x11", "wayland"}:
+        return requested
+    if os.environ.get("GDK_BACKEND"):
+        return os.environ["GDK_BACKEND"]
+    if hide_from_dock is None:
+        hide_from_dock = get_config().hide_from_dock
+    if hide_from_dock and detect_session() == "wayland" and os.environ.get("DISPLAY"):
+        return "x11"
+    return detect_session()
+
+
+def display_backend_label() -> str:
+    """``display_backend`` plus the reason, as printed by ``--status``/``--diagnose``."""
+    backend = display_backend()
+    return (
+        f"{backend} (kept out of the dock)" if backend == "x11" and get_config().hide_from_dock else backend
+    )
+
+
+def _apply_display_backend() -> str:
+    """Export ``GDK_BACKEND`` *before* GTK initialises (it cannot be changed later)."""
+    backend = display_backend()
+    if backend in {"x11", "wayland"}:
+        os.environ["GDK_BACKEND"] = backend
+    return backend
+
+
 def run_app(command: str, debug: bool = False) -> int:
     """Hand the command to the (single) GTK application instance."""
+    backend = _apply_display_backend()
     from .app import ClipboardApplication, gtk_available
 
     if not gtk_available():
         print(f"{APP_NAME}: GTK 4 is required for this command.", file=sys.stderr)
         print("  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1", file=sys.stderr)
         return EXIT_FAILURE
+    log.debug("display backend: %s", backend)
     config = get_config()
     set_language(config.language)
     try:

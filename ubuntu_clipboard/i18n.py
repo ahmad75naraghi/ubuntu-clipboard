@@ -127,6 +127,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "fa": "بستن پنجره وقتی تمرکز از دست می‌رود",
         "en": "Close the window when it loses focus",
     },
+    "settings.hide_from_dock": {
+        "fa": "نمایش ندادن در داک اوبونتو",
+        "en": "Keep out of the Ubuntu dock",
+    },
+    "settings.hide_from_dock.subtitle": {
+        "fa": "پنجرهٔ کلیپ‌بورد در داک و فهرست پنجره‌ها دیده نشود (نیازمند ورود مجدد)",
+        "en": "The clipboard popup stays out of the dock and the window list (needs a restart)",
+    },
     "settings.auto_start": {"fa": "اجرا هنگام ورود به سیستم", "en": "Start when I log in"},
     "settings.shortcut": {"fa": "میانبر باز کردن", "en": "Open shortcut"},
     "settings.shortcut.subtitle": {

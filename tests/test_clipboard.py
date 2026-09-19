@@ -72,3 +72,55 @@ def test_capabilities_are_immutable():
         assert "frozen" in str(exc).lower() or "cannot assign" in str(exc).lower()
     else:  # pragma: no cover - should not happen
         raise AssertionError("Capabilities should be frozen")
+
+
+# ── password manager marker on the Wayland side ─────────────────────────────
+class FakeRunner:
+    """Records the commands it is asked to run and answers with fixed output."""
+
+    def __init__(self, output: bytes = b"", returncode: int = 0, explode: bool = False) -> None:
+        self.output = output
+        self.returncode = returncode
+        self.explode = explode
+        self.commands: list = []
+
+    def __call__(self, command, **_kwargs):
+        self.commands.append(list(command))
+        if self.explode:
+            raise OSError("wl-paste is not there")
+        import subprocess
+
+        return subprocess.CompletedProcess(list(command), self.returncode, self.output, b"")
+
+
+WAYLAND = {"XDG_SESSION_TYPE": "wayland", "WAYLAND_DISPLAY": "wayland-0"}
+
+
+def test_the_wayland_side_can_report_a_password_marker():
+    runner = FakeRunner(b"text/plain\nx-kde-passwordManagerHint\n")
+    assert clipboard.wayland_offers_password_hint(which_for("wl-paste"), runner, WAYLAND) is True
+    assert runner.commands == [["wl-paste", "--list-types"]]
+
+
+def test_a_plain_selection_is_not_a_password():
+    runner = FakeRunner(b"text/plain\nimage/png\n")
+    assert clipboard.wayland_offers_password_hint(which_for("wl-paste"), runner, WAYLAND) is False
+
+
+def test_the_marker_check_is_skipped_on_x11(monkeypatch):
+    """On X11 the marker is visible through GTK, so nothing is asked of wl-paste."""
+    runner = FakeRunner(b"x-kde-passwordManagerHint\n")
+    assert clipboard.wayland_offers_password_hint(which_for("wl-paste"), runner, {"DISPLAY": ":0"}) is False
+    assert clipboard.wayland_offers_password_hint(which_for(), runner, WAYLAND) is False
+    assert runner.commands == []
+
+
+def test_the_marker_check_survives_a_broken_helper():
+    assert (
+        clipboard.wayland_offers_password_hint(which_for("wl-paste"), FakeRunner(b"", returncode=1), WAYLAND)
+        is False
+    )
+    assert (
+        clipboard.wayland_offers_password_hint(which_for("wl-paste"), FakeRunner(explode=True), WAYLAND)
+        is False
+    )

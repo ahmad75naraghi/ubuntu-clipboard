@@ -2,11 +2,11 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.1.2-blue)
+![Version](https://img.shields.io/badge/version-2.1.3-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-353%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-380%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -177,7 +177,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.1.2
+Ubuntu Clipboard 2.1.3
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -190,6 +190,7 @@ Ubuntu Clipboard 2.1.2
   autostart        enabled
   instance         running
   auto paste       yes via xdotool
+  window backend   x11 (kept out of the dock)
   tools            wl-copy=yes, wl-paste=yes, xclip=yes, xsel=no, xdotool=yes, wtype=no, ydotool=no
   clipboard tools  readable / writable
   shortcut         '<Super>v' -> '/usr/bin/python3 -m ubuntu_clipboard --toggle'
@@ -217,6 +218,7 @@ Ubuntu Clipboard 2.1.2
 | `window_width` / `window_height` | `420` / `560` | ۳۲۰–۱۶۰۰ | اندازه پنجره |
 | `image_thumb_height` | `96` | ۴۰–۳۲۰ | ارتفاع بندانگشتی تصویر |
 | `close_on_focus_loss` | `true` | — | بستن پنجره با از‌دست‌رفتن فوکوس |
+| `hide_from_dock` | `true` | — | نمایش ندادن پنجره در داک و فهرست پنجره‌ها |
 | `auto_start` | `true` | — | اجرا در شروع نشست |
 | `shortcut` | `<Super>v` | — | میانبر پیشنهادی هنگام `--install` |
 
@@ -261,7 +263,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۵۳ تست
+└── test_*.py        # ۳۸۰ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -307,7 +309,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۵۳ تست
+make test        # ۳۸۰ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -347,6 +349,29 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 سرویس، ثبت بودن میانبر، وجود فایل فرمان، تداخل با میانبرهای دیگر یا میانبر پوستهٔ گنوم،
 زنده بودن `gsd-media-keys` و وضعیت چسباندن خودکار. در پایان فهرست مشکلات و سریع‌ترین
 راه‌حل‌ها را چاپ می‌کند.
+
+### پنجره در داک اوبونتو دیده می‌شود
+
+گنوم به برنامه‌ای که بومی وی‌لند اجرا می‌شود هیچ راهی برای «در داک نبودن» نمی‌دهد؛
+پس به‌صورت پیش‌فرض پنجرهٔ برنامه از مسیر X11 (همان XWayland که خود گنوم اجرا می‌کند)
+باز می‌شود، چون فقط آن مسیر نشان `skip-taskbar` را می‌پذیرد. نشست همچنان وی‌لند است و
+چسباندن با همان `ydotool` انجام می‌شود؛ فقط پنجره در داک و فهرست پنجره‌ها نمی‌آید.
+
+```bash
+ubuntu-clipboard --status     # خط «window backend» را ببینید
+```
+
+در این حالت هم فیلتر رمزها کار می‌کند: نشانهٔ «ذخیره نکن» که مدیران رمز روی سمت
+وی‌لند می‌گذارند در سمت X11 وجود ندارد، پس برنامه پیش از ذخیره‌سازی همان نشانه را
+مستقیم از سمت وی‌لند می‌پرسد.
+
+اگر خواستید پنجره در داک بیاید (مثلاً برای جابه‌جایی با Alt+Tab):
+
+```bash
+UBUNTU_CLIPBOARD_BACKEND=wayland ubuntu-clipboard --toggle   # یک‌بار
+# یا همیشه: hide_from_dock را در ~/.config/ubuntu-clipboard/config.json
+# و از پنجرهٔ تنظیمات روی false بگذارید
+```
 
 ### چسباندن خودکار (Paste) روی گنوم
 
@@ -478,8 +503,9 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 353 headless
-tests exercise.
+module outside `ui/` is importable without a display, which is what the 380 headless
+tests exercise. The popup is kept out of the Ubuntu dock, and picking an item
+cancels any paste that is still on its way.
 
 ```bash
 git clone https://github.com/ahmad75naraghi/ubuntu-clipboard.git

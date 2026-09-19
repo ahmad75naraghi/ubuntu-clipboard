@@ -155,6 +155,9 @@ class Config:
     window_height: int = 560
     image_thumb_height: int = 96
     close_on_focus_loss: bool = True
+    # GNOME gives a Wayland client no way to skip the taskbar, so the popup is
+    # started on the X11 (XWayland) backend, where ``skip-taskbar`` is honoured.
+    hide_from_dock: bool = True
     # integration
     auto_start: bool = True
     shortcut: str = "<Super>v"

@@ -103,11 +103,19 @@ if HAS_GTK:
             self._config_monitor = None
             self._previous_window = None
             self._expected_text: str | None = None
+            #: Bumped on every paste; a mismatch means "the user moved on".
+            self._paste_token = 0
             self._save_guard_until = 0.0
             self._reload_pending = False
             # ``GApplication`` has no ``set_application_name``; the GLib global
             # is what GTK itself calls during ``gtk_init``.
             GLib.set_application_name(APP_NAME)
+            # On the X11 backend GTK builds ``WM_CLASS`` from the program name,
+            # which for a ``python3 -m ubuntu_clipboard`` launch is "python3" —
+            # GNOME would then show a generic icon and name for the windows.
+            # The application id is what the desktop entry declares as
+            # ``StartupWMClass``, so using it keeps the windows ours.
+            GLib.set_prgname(APP_ID)
 
         # ── startup ────────────────────────────────────────────────────────
         def do_startup(self) -> None:  # noqa: N802 - GObject vfunc
@@ -192,6 +200,8 @@ if HAS_GTK:
             return self.window
 
         def show_window(self):
+            self._cancel_pending_paste()
+            log.debug("showing the window")
             window = self.ensure_window()
             if not window.get_visible():
                 # Remember where focus was so X11 users get it back after pasting.
@@ -201,7 +211,8 @@ if HAS_GTK:
             return window
 
         def hide_window(self) -> None:
-            if self.window is not None:
+            if self.window is not None and self.window.get_visible():
+                log.debug("hiding the window")
                 self.window.hide_window()
 
         def toggle_window(self) -> None:
@@ -282,6 +293,8 @@ if HAS_GTK:
 
         def paste_item(self, item: ClipboardItem) -> None:
             """Copy ``item`` and deliver ``Ctrl+V`` to the previously focused app."""
+            self._paste_token += 1
+            token = self._paste_token
             self.hide_window()
             if not self.set_clipboard(item):
                 self.notify(t("notify.copied"))
@@ -293,17 +306,40 @@ if HAS_GTK:
                 item.type.value,
                 len(self._expected_text or ""),
             )
-            GLib.timeout_add(PASTE_DELAY_MS, self._deliver_paste)
+            GLib.timeout_add(PASTE_DELAY_MS, self._deliver_paste, token)
 
-        def _deliver_paste(self) -> bool:
-            threading.Thread(target=self._paste_worker, name="paste", daemon=True).start()
+        def _cancel_pending_paste(self) -> None:
+            """Drop a paste that has not been delivered yet.
+
+            The clipboard is prepared and ``Ctrl+V`` is sent a moment later; if
+            the user reopens the window in between they clearly want the window
+            back, not a stray paste landing in whatever window has focus. This
+            is also what stops the window from blinking open and shut while a
+            paste is on its way.
+            """
+            self._paste_token += 1
+
+        def _deliver_paste(self, token: int) -> bool:
+            if token != self._paste_token:
+                log.debug("pending paste cancelled before it was sent")
+                return False
+            threading.Thread(target=self._paste_worker, args=(token,), name="paste", daemon=True).start()
             return False
 
-        def _paste_worker(self) -> None:
+        def _paste_worker(self, token: int) -> None:
+            if token != self._paste_token:
+                log.debug("pending paste cancelled before focus was moved")
+                return
             if self._previous_window:
+                # Giving focus back *before* the clipboard is ready is what made
+                # the popup blink: the focus change hid it, and if the user
+                # reopened it meanwhile the two kept fighting each other.
                 activate_window(self._previous_window)
                 self._previous_window = None
             self._ensure_clipboard_content()
+            if token != self._paste_token:
+                log.debug("pending paste cancelled while the clipboard was prepared")
+                return
             succeeded, tool = send_paste()
             if not succeeded:
                 # Be specific: the item *is* on the clipboard, but the user has

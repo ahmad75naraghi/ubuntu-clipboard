@@ -204,8 +204,18 @@ def send_paste(
 def active_window(
     which: Which = shutil.which,
     runner: Runner = subprocess.run,
+    env: dict[str, str] | None = None,
 ) -> str | None:
-    """Window id of the currently active X11/XWayland window."""
+    """Window id of the currently active X11 window, or ``None``.
+
+    Only an X11 *session* can answer this: on Wayland ``_NET_ACTIVE_WINDOW``
+    still points at the last X11 window that had focus, so trusting it would
+    move focus — and the paste — into an application the user had left behind.
+    Mutter already returns focus to the previously focused window when ours
+    hides, so nothing is lost by staying out of its way.
+    """
+    if detect_session(env) != "x11":
+        return None
     if not which("xdotool"):
         return None
     try:
@@ -527,10 +537,12 @@ def ensure_clipboard_text(
     the first (GTK) write had not been published yet.
     """
     sleeper = sleep or SLEEP
-    for _ in range(max(1, attempts)):
-        if selection_agrees(text, which, runner, env):
-            return True, None
-        sleeper(pause)
+    if selection_agrees(text, which, runner, env):
+        return True, None
+    # Publishing again is cheap and immediate, while waiting for GTK's
+    # asynchronous write is not: on a Wayland session that write only reaches
+    # the Wayland side, so an X11 reader keeps answering with the old payload
+    # and the wait used to burn its full timeout on *every* paste.
     tool = write_clipboard_text(text, which, env, popen)
     if tool is None:
         return False, None

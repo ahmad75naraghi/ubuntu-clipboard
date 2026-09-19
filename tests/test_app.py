@@ -230,7 +230,7 @@ def test_paste_item_touches_and_hides(env, monkeypatch):
     with_clipboard(env)
     scheduled: list = []
     monkeypatch.setattr(
-        env.app_module.GLib, "timeout_add", lambda delay, callback: scheduled.append(callback)
+        env.app_module.GLib, "timeout_add", lambda delay, callback, *args: scheduled.append(callback)
     )
     env.app.paste_item(env.store.get(item.id))
     assert env.store.list()[0].id == item.id
@@ -249,14 +249,14 @@ def test_paste_item_without_a_clipboard_notifies(env, monkeypatch):
 def test_paste_worker_reports_failures(env, monkeypatch):
     collected = notifications(env, monkeypatch)
     monkeypatch.setattr(env.app_module, "send_paste", lambda *a, **k: (False, None))
-    env.app._paste_worker()
+    env.app._paste_worker(env.app._paste_token)
     assert collected
 
 
 def test_paste_worker_is_silent_when_the_helper_works(env, monkeypatch):
     collected = notifications(env, monkeypatch)
     monkeypatch.setattr(env.app_module, "send_paste", lambda *a, **k: (True, "xdotool"))
-    env.app._paste_worker()
+    env.app._paste_worker(env.app._paste_token)
     assert collected == []
 
 
@@ -332,3 +332,127 @@ def test_bundled_icon_is_a_hicolor_tree():
     assert source.is_file()
     assert source == assets_dir() / ICON_RELATIVE_PATH.removeprefix("assets/")
     assert source.name == "ubuntu-clipboard.png"
+
+
+def test_a_pending_paste_is_cancelled_when_the_window_opens_again(env, monkeypatch):
+    """Reopening the window must not let a stale Ctrl+V land somewhere else."""
+    item = env.store.add_text("paste me")
+    env.app.dispatch("show")
+    with_clipboard(env)
+    monkeypatch.setattr("ubuntu_clipboard.paste.send_paste", lambda *a, **k: pytest.fail("must not paste"))
+    scheduled: list = []
+    monkeypatch.setattr(
+        env.app_module.GLib, "timeout_add", lambda delay, callback, *args: scheduled.append((callback, args))
+    )
+    env.app.paste_item(env.store.get(item.id))
+
+    # the user presses Win+V again while the paste is on its way
+    env.app.dispatch("show")
+    callback, args = scheduled[0]
+    callback(*args)
+    assert env.app.window.get_visible() is True
+
+
+def test_a_stale_paste_worker_does_nothing(env, monkeypatch):
+    env.app.dispatch("show")
+    with_clipboard(env)
+    stale = env.app._paste_token - 1
+    monkeypatch.setattr("ubuntu_clipboard.paste.send_paste", lambda *a, **k: pytest.fail("must not paste"))
+    monkeypatch.setattr(env.app, "_ensure_clipboard_content", lambda: None)
+    env.app._paste_worker(stale)
+
+
+def test_paste_cancellation_is_logged(env, caplog):
+    with caplog.at_level("DEBUG", logger="ubuntu_clipboard.app"):
+        env.app._cancel_pending_paste()
+        assert env.app._deliver_paste(env.app._paste_token - 1) is False
+    assert "cancelled" in caplog.text
+
+
+def test_paste_worker_returns_focus_and_pastes(env, monkeypatch):
+    """The happy path: focus goes back to where it was, then Ctrl+V is sent."""
+    focused: list = []
+    pasted: list = []
+    monkeypatch.setattr(env.app_module, "activate_window", lambda wid: focused.append(wid) or True)
+    monkeypatch.setattr(
+        env.app_module, "send_paste", lambda *a, **k: pasted.append(True) or (True, "ydotool")
+    )
+    with_clipboard(env)
+    env.app._expected_text = None  # nothing to verify
+    env.app._previous_window = "1234567"
+    env.app._paste_worker(env.app._paste_token)
+    assert focused == ["1234567"]
+    assert pasted == [True]
+    assert env.app._previous_window is None
+
+
+def test_paste_worker_skips_focus_without_a_previous_window(env, monkeypatch):
+    monkeypatch.setattr(
+        env.app_module, "activate_window", lambda *a: pytest.fail("there is no window to focus")
+    )
+    monkeypatch.setattr(env.app_module, "send_paste", lambda *a, **k: (True, "ydotool"))
+    with_clipboard(env)
+    env.app._expected_text = None
+    env.app._previous_window = None
+    env.app._paste_worker(env.app._paste_token)
+
+
+def test_a_cancelled_paste_leaves_focus_alone(env, monkeypatch):
+    """This is the flicker: a cancelled paste must not pull focus away again."""
+    monkeypatch.setattr(env.app_module, "activate_window", lambda *a: pytest.fail("focus must not move"))
+    monkeypatch.setattr("ubuntu_clipboard.paste.send_paste", lambda *a, **k: pytest.fail("no paste"))
+    with_clipboard(env)
+    env.app._previous_window = "1234567"
+    env.app._cancel_pending_paste()
+    env.app._paste_worker(env.app._paste_token - 1)
+    assert env.app._previous_window == "1234567"
+
+
+def test_show_window_remembers_where_focus_was(env, monkeypatch):
+    monkeypatch.setattr(env.app_module, "active_window", lambda: "9999")
+    env.app.show_window()
+    assert env.app._previous_window == "9999"
+    # a second show while it is already visible must not overwrite it
+    monkeypatch.setattr(env.app_module, "active_window", lambda: "8888")
+    env.app.show_window()
+    assert env.app._previous_window == "9999"
+
+
+def test_monitor_ignores_a_password_the_xwayland_backend_cannot_see(env, monkeypatch):
+    """The marker only exists on the Wayland side; the history must stay clean."""
+    monkeypatch.setattr(env.monitor_module, "password_hint_hidden_by_xwayland", lambda: True)
+    attach(env, text="hunter2")
+    assert env.store.count() == 0
+
+
+def test_the_hidden_password_probe_runs_only_on_the_xwayland_backend(env, monkeypatch):
+    asked: list[bool] = []
+    monkeypatch.setattr(
+        env.monitor_module, "wayland_offers_password_hint", lambda: asked.append(True) or True
+    )
+    monkeypatch.setattr("ubuntu_clipboard.clipboard.detect_session", lambda *a, **k: "wayland")
+    monkeypatch.setattr("ubuntu_clipboard.cli.display_backend", lambda *a, **k: "x11")
+    assert env.monitor_module.password_hint_hidden_by_xwayland() is True
+
+    monkeypatch.setattr("ubuntu_clipboard.cli.display_backend", lambda *a, **k: "wayland")
+    assert env.monitor_module.password_hint_hidden_by_xwayland() is False
+
+    monkeypatch.setattr("ubuntu_clipboard.clipboard.detect_session", lambda *a, **k: "x11")
+    monkeypatch.setattr("ubuntu_clipboard.cli.display_backend", lambda *a, **k: "x11")
+    assert env.monitor_module.password_hint_hidden_by_xwayland() is False
+    assert len(asked) == 1
+
+
+def test_the_monitor_still_captures_ordinary_text(env, monkeypatch):
+    """The added probe must never swallow a normal copy."""
+    monkeypatch.setattr(env.monitor_module, "password_hint_hidden_by_xwayland", lambda: False)
+    attach(env, text="ordinary text")
+    assert env.store.count() == 1
+
+
+def test_windows_are_tied_to_the_desktop_entry(env):
+    """With the X11 backend GNOME matches windows by ``WM_CLASS``."""
+    from ubuntu_clipboard import APP_ID
+
+    assert env.app_module.GLib.application_name == "Ubuntu Clipboard"
+    assert env.app_module.GLib.prgname == APP_ID

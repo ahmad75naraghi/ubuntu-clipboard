@@ -495,8 +495,38 @@ class ClipboardWindow(Gtk.ApplicationWindow):  # type: ignore[misc]
 
     def _on_mapped(self, *_args) -> None:
         self._focus_grace_until = time.monotonic() + FOCUS_GRACE_SECONDS
+        self.apply_dock_hints()
         self.refresh(force=True)
         self.search_entry.grab_focus()
+
+    # ── desktop integration ────────────────────────────────────────────────
+    def apply_dock_hints(self) -> bool:
+        """Ask the window manager to keep this popup out of dock/window lists.
+
+        Only X11 (including XWayland, which is why the application prefers that
+        backend on Wayland — see ``display_backend``) offers the hint; a native
+        Wayland client has no way to skip the taskbar and GNOME shows it in the
+        dock. Returns whether the hint was applied.
+        """
+        if not getattr(self.config, "hide_from_dock", True):
+            return False
+        surface = self.get_surface() if hasattr(self, "get_surface") else None
+        if surface is None:
+            return False
+        try:
+            import gi
+
+            gi.require_version("GdkX11", "4.0")
+            from gi.repository import GdkX11  # type: ignore[attr-defined]
+
+            if not isinstance(surface, GdkX11.X11Surface):
+                return False
+            surface.set_skip_taskbar_hint(True)
+            surface.set_skip_pager_hint(True)
+        except (ImportError, AttributeError, TypeError, ValueError):  # pragma: no cover - Wayland/double
+            return False
+        log.debug("window hidden from the dock and the window list")
+        return True
 
     def _on_unmapped(self, *_args) -> None:
         self._was_active = False

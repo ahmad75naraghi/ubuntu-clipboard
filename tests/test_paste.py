@@ -143,8 +143,12 @@ def test_active_window_and_activation():
     def runner_with_output(command, **_kwargs):
         return subprocess.CompletedProcess(list(command), 0, b"12345\n", b"")
 
-    assert paste.active_window(which_for("xdotool"), runner_with_output) == "12345"
-    assert paste.active_window(which_for(), runner) is None
+    x11 = {"XDG_SESSION_TYPE": "x11"}
+    assert paste.active_window(which_for("xdotool"), runner_with_output, x11) == "12345"
+    assert paste.active_window(which_for(), runner, x11) is None
+    # never trust a stale X11 window on a Wayland session
+    wayland = {"WAYLAND_DISPLAY": "wayland-0"}
+    assert paste.active_window(which_for("xdotool"), runner_with_output, wayland) is None
     assert paste.activate_window("12345", which_for("xdotool"), runner) is True
     assert paste.activate_window("", which_for("xdotool"), runner) is False
     assert paste.activate_window("1", which_for(), runner) is False
@@ -154,7 +158,7 @@ def test_active_window_handles_failures():
     def failing(command, **_kwargs):
         raise OSError("xdotool missing")
 
-    assert paste.active_window(which_for("xdotool"), failing) is None
+    assert paste.active_window(which_for("xdotool"), failing, {"XDG_SESSION_TYPE": "x11"}) is None
 
 
 def test_status_description():
@@ -424,3 +428,25 @@ def test_ensure_clipboard_reports_a_stubborn_clipboard(monkeypatch):
     )
     assert verified is False
     assert tool == "wl-copy"
+
+
+def test_ensure_clipboard_does_not_wait_for_the_gtk_write(monkeypatch):
+    """A disagreeing side is re-published at once instead of being waited for."""
+    sleeps: list[float] = []
+    popen = RecordingPopen()
+    agreed = {"value": False}
+
+    def agrees(*_args, **_kwargs):
+        return agreed["value"]
+
+    def starter(command, **kwargs):
+        process = popen(command, **kwargs)
+        agreed["value"] = True
+        return process
+
+    monkeypatch.setattr(paste, "selection_agrees", agrees)
+    verified, tool = paste.ensure_clipboard_text(
+        "text", which_for("wl-copy"), {}, popen=starter, sleep=sleeps.append
+    )
+    assert (verified, tool) == (True, "wl-copy")
+    assert sleeps == []  # the first read-back already agreed

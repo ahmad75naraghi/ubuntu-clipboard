@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
@@ -494,3 +495,51 @@ def test_test_paste_reports_a_clipboard_that_refuses_the_item(monkeypatch, capsy
     out = capsys.readouterr().out
     assert "the sides disagree" in out
     assert "the stale one" in out
+
+
+def test_display_backend_prefers_x11_to_stay_out_of_the_dock(monkeypatch):
+    monkeypatch.delenv("UBUNTU_CLIPBOARD_BACKEND", raising=False)
+    monkeypatch.delenv("GDK_BACKEND", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("DISPLAY", ":0")
+    assert cli.display_backend(hide_from_dock=True) == "x11"
+    assert cli.display_backend(hide_from_dock=False) == "wayland"
+
+
+def test_display_backend_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("UBUNTU_CLIPBOARD_BACKEND", "wayland")
+    assert cli.display_backend(hide_from_dock=True) == "wayland"
+    monkeypatch.setenv("UBUNTU_CLIPBOARD_BACKEND", "x11")
+    assert cli.display_backend(hide_from_dock=False) == "x11"
+
+
+def test_display_backend_without_xwayland_stays_on_wayland(monkeypatch):
+    monkeypatch.delenv("UBUNTU_CLIPBOARD_BACKEND", raising=False)
+    monkeypatch.delenv("GDK_BACKEND", raising=False)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    assert cli.display_backend(hide_from_dock=True) == "wayland"
+
+
+def test_apply_display_backend_exports_gdk_backend(monkeypatch):
+    monkeypatch.delenv("GDK_BACKEND", raising=False)
+    monkeypatch.setenv("UBUNTU_CLIPBOARD_BACKEND", "x11")
+    assert cli._apply_display_backend() == "x11"
+    assert os.environ["GDK_BACKEND"] == "x11"
+
+
+def test_status_and_diagnose_mention_the_window_backend(capsys):
+    assert cli.main(["--status"]) == cli.EXIT_OK
+    assert "window backend" in capsys.readouterr().out
+
+
+def test_backend_label_explains_the_choice(monkeypatch):
+    monkeypatch.setenv("UBUNTU_CLIPBOARD_BACKEND", "x11")
+    assert "kept out of the dock" in cli.display_backend_label()
+    monkeypatch.setattr(cli, "display_backend", lambda *a, **k: "wayland")
+    assert cli.display_backend_label() == "wayland"

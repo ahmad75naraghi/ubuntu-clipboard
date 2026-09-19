@@ -678,6 +678,7 @@ def _build_glib() -> types.ModuleType:
     module.Bytes = FakeBytes
     # ``GApplication`` has no ``set_application_name``; the GLib global is real.
     module.set_application_name = lambda name: object.__setattr__(module, "application_name", name)
+    module.set_prgname = lambda name: object.__setattr__(module, "prgname", name)
     module.Variant = lambda *args: FakeObject()
     module.VariantType = lambda *args: FakeObject()
     module.Error = Exception

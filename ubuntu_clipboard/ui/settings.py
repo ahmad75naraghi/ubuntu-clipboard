@@ -245,6 +245,13 @@ class SettingsWindow:
     def _build_system(self, config) -> None:
         section = _Section(t("settings.group.system"))
         section.add(self._row(t("settings.auto_start"), "", self._switch(config.auto_start, "auto_start")))
+        section.add(
+            self._row(
+                t("settings.hide_from_dock"),
+                t("settings.hide_from_dock.subtitle"),
+                self._switch(config.hide_from_dock, "hide_from_dock"),
+            )
+        )
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         box.set_valign(Gtk.Align.CENTER)

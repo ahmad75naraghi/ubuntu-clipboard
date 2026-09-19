@@ -3,7 +3,10 @@
 The v1 daemon polled the clipboard four times per second by spawning up to four
 ``wl-paste`` processes per iteration. GDK already tells us when the selection
 changes and reads it asynchronously, so this module does exactly that: no
-polling, no child processes, no busy loop.
+polling and no busy loop. One short-lived ``wl-paste --list-types`` is spawned
+per copy when the window runs through XWayland, because the password-manager
+marker does not exist on that side of the clipboard (see
+:func:`password_hint_hidden_by_xwayland`).
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import logging
 import time
 from collections.abc import Callable
 
+from .clipboard import PASSWORD_HINT_MIME, wayland_offers_password_hint
 from .models import ClipboardItem
 from .storage import HistoryStore
 
@@ -30,8 +34,6 @@ except (ImportError, ValueError):  # pragma: no cover
     Gdk = GLib = None  # type: ignore[assignment]
     HAS_GTK = False
 
-#: MIME type used by KDE/GNOME password managers to mark "do not record this".
-PASSWORD_HINT_MIME = "x-kde-passwordManagerHint"
 #: A suppression that never sees a matching change event expires after this.
 SUPPRESS_TIMEOUT_SECONDS = 2.0
 #: Coalesce the burst of "changed" signals some applications emit.
@@ -46,6 +48,22 @@ def is_password_hint(formats: object) -> bool:
         return bool(formats.contain_mime_type(PASSWORD_HINT_MIME))  # type: ignore[attr-defined]
     except (AttributeError, TypeError):
         return False
+
+
+def password_hint_hidden_by_xwayland() -> bool:
+    """A password marker GTK cannot see, because we read the X11 selection.
+
+    With the ``hide_from_dock`` backend the window runs through XWayland while
+    the session is Wayland: the marker never arrives in ``Gdk.Clipboard``, so the
+    Wayland side is asked instead. Costs one short-lived ``wl-paste`` per copy,
+    and only in that configuration.
+    """
+    from .cli import display_backend
+    from .clipboard import detect_session
+
+    if detect_session() != "wayland" or display_backend() != "x11":
+        return False
+    return wayland_offers_password_hint()
 
 
 class ClipboardMonitor:
@@ -128,7 +146,7 @@ class ClipboardMonitor:
         except Exception:  # pragma: no cover - display going away
             log.debug("cannot query clipboard formats", exc_info=True)
             return False
-        if is_password_hint(formats):
+        if is_password_hint(formats) or password_hint_hidden_by_xwayland():
             log.info("ignoring clipboard marked as a password by the source application")
             return False
         self._token += 1
