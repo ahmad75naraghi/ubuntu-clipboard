@@ -30,6 +30,12 @@ def isolated_home(tmp_path, monkeypatch):
     config_module.reset_config()
 
 
+@pytest.fixture(autouse=True)
+def instant_sleep(monkeypatch):
+    """Never wait for a daemon in tests: the wait logic is exercised directly."""
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.SLEEP", lambda _seconds: None)
+
+
 @pytest.fixture
 def config() -> Config:
     return Config()

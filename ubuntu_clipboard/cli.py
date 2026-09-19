@@ -334,7 +334,7 @@ def _process_running(pattern: str) -> bool | None:
     """Whether a process matching ``pattern`` is running (``None`` = cannot tell)."""
     try:
         result = subprocess.run(
-            ["pgrep", "-f", pattern], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            ["pgrep", "-x", pattern], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
         )
     except OSError:  # pragma: no cover - no pgrep
         return None
@@ -346,6 +346,24 @@ def _registered_paths() -> list[str]:
     from .shortcut import KEY, SCHEMA, get_value, parse_list
 
     return parse_list(get_value(SCHEMA, KEY))
+
+
+def _entry_details(path: str) -> dict[str, str]:
+    """name/binding/command of one custom shortcut (empty strings on failure)."""
+    from .shortcut import CHILD_SCHEMA, get_value
+
+    return {key: (get_value(CHILD_SCHEMA, key, path) or "").strip("'") for key in ("binding", "command")}
+
+
+def _first_word(command: str) -> str:
+    """The program a keybinding command starts, or '' when unparsable."""
+    if not command:
+        return ""
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return ""
+    return parts[0] if parts else ""
 
 
 def cmd_diagnose(config: Config) -> int:
@@ -401,17 +419,27 @@ def cmd_diagnose(config: Config) -> int:
             problems.append("our shortcut is not in the GNOME keybinding list")
         if binding and binding.strip("'") != wanted:
             print(f"   note                   the configured key is {wanted!r}")
-        if command:
-            program = shlex.split(command.strip("'"))[0] if command.strip("'") else ""
-            if program and not Path(program).exists():
-                print(f"   command exists         NO — {program} is gone")
-                problems.append("the shortcut runs a program that no longer exists")
+        program = _first_word(command.strip("'"))
+        if program and not Path(program).exists():
+            print(f"   command exists         NO — {program} is gone")
+            problems.append("the shortcut runs a program that no longer exists")
 
-        # 3. does anything else own the key?
-        print("\n3. other owners of the same key")
+        # 3. what else is registered, and does it still work?
+        print("\n3. every custom shortcut")
+        for path in _registered_paths():
+            slot = path.rstrip("/").rsplit("/", 1)[-1]
+            entry = _entry_details(path)
+            print(f"   {slot:<22} {entry['binding'] or '-'}  {entry['command'] or '-'}")
+            program = _first_word(entry["command"])
+            if program and not Path(program).exists():
+                print("                          ↳ that program is gone — this shortcut cannot work")
+                if path != KEY_PATH:
+                    problems.append(
+                        f"the shortcut {slot} ({program}) no longer works — remove it or take the key over"
+                    )
         clashing = foreign_bindings(wanted)
         for path, other in clashing:
-            print(f"   other shortcut         {path} ({other or 'no command'})")
+            print(f"   same key as ours       {path} ({other or 'no command'})")
         if clashing:
             problems.append(
                 "another custom shortcut uses the same key — "
@@ -447,7 +475,8 @@ def cmd_diagnose(config: Config) -> int:
             print(f"   {index}. {problem}")
         print("\n   fastest fixes:")
         print("     ubuntu-clipboard --install-shortcut --take-binding")
-        print("     systemctl --user restart org.gnome.SettingsDaemon.MediaKeys")
+        print("     pgrep -a gsd-media-keys   # dead? the tool restarts it on the next install")
+        print("     systemctl --user reset-failed org.gnome.SettingsDaemon.MediaKeys")
         print("     ubuntu-clipboard --install-shortcut --binding '<Super><Alt>v'")
     print("\nfull report for a bug report: ubuntu-clipboard --collect-logs")
     return EXIT_OK

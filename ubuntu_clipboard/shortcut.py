@@ -55,9 +55,13 @@ RIVAL_CLIPBOARDS = (
 )
 #: ``gsettings`` is a session bus round trip; it can be slow on a loaded machine.
 SET_TIMEOUT = 10.0
+#: Sleeping between "is the plugin back?" checks; tests replace it.
+SLEEP: Callable[[float], None] = time.sleep
 
 #: The systemd user unit that owns the custom keybindings.
 MEDIA_KEYS_UNIT = "org.gnome.SettingsDaemon.MediaKeys"
+#: The plugin binary, used when systemd refuses to start the unit.
+MEDIA_KEYS_BINARY = "/usr/libexec/gsd-media-keys"
 
 #: D-Bus is the way back: the unit is activatable but refuses manual starts.
 WAKE_MEDIA_KEYS = (
@@ -303,35 +307,83 @@ def media_keys_units() -> tuple[str, ...]:
 def refresh_media_keys(
     runner: Runner = subprocess.run,
     which: Callable[[str], str | None] | None = None,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] | None = None,
+    spawn: Callable[[], bool] | None = None,
 ) -> str | None:
-    """Ask the shortcut daemon to reload, so the new key works immediately.
+    """Make sure the shortcut daemon has the current keybinding loaded.
 
-    ``gnome-settings-daemon`` watches the keybinding list, but a freshly
-    written binding is regularly ignored until the plugin restarts. Ubuntu
-    refuses ``systemctl --user restart`` for this unit ("may be requested by
-    dependency only"), so the plugin is restarted by hand and then *verified*:
-    if it does not come back the caller is warned, instead of being told a
-    happy story while every keyboard shortcut sits dead.
+    Ubuntu refuses ``systemctl --user restart org.gnome.SettingsDaemon.MediaKeys``
+    ("may be requested by dependency only"), and killing the plugin is worse
+    than useless: it leaves the whole desktop without shortcuts. So a *running*
+    plugin is asked to reload by re-writing the list it watches, and a *dead*
+    one is brought back (D-Bus activation, then the binary as a last resort).
+    The result is verified, and a failure is reported instead of glossed over.
     """
     finder = which or shutil.which
+    sleeper = sleep or SLEEP
     unit = media_keys_units()[0]
-    if finder("systemctl"):
-        result = _run_quiet(runner, ["systemctl", "--user", "restart", unit])
-        if result is not None and result.returncode == 0:
-            return f"reloaded {unit}"
-    if not finder("pkill"):
+    if _media_keys_alive(runner):
+        if finder("systemctl"):
+            result = _run_quiet(runner, ["systemctl", "--user", "restart", unit])
+            if result is not None and result.returncode == 0:
+                return f"reloaded {unit}"
+        if _touch_keybindings(runner):
+            return "asked GNOME to reload the shortcut list"
         return None
-    _run_quiet(runner, ["pkill", "-f", "gsd-media-keys"])
-    if _wait_for_media_keys(runner, sleep):
-        return "restarted gsd-media-keys"
+    return _wake_media_keys(runner, finder, sleeper, spawn)
+
+
+def _wake_media_keys(
+    runner: Runner,
+    finder: Callable[[str], str | None],
+    sleep: Callable[[float], None],
+    spawn: Callable[[], bool] | None,
+) -> str | None:
+    """Start the plugin again — systemd refuses, so D-Bus then the binary."""
+    _run_quiet(runner, ["systemctl", "--user", "reset-failed", media_keys_units()[0]])
     if finder("gdbus"):
         # A D-Bus call is the documented way back: the unit is D-Bus activated
         # even though systemd refuses manual starts.
         _run_quiet(runner, list(WAKE_MEDIA_KEYS))
     if _wait_for_media_keys(runner, sleep):
-        return "restarted gsd-media-keys"
-    return "warning: gsd-media-keys was restarted but has not come back yet — log out and back in once"
+        return "started gsd-media-keys again"
+    if (spawn or _spawn_media_keys)() and _wait_for_media_keys(runner, sleep):
+        return "started gsd-media-keys again"
+    return "warning: gsd-media-keys is not running — log out and back in once"
+
+
+def _spawn_media_keys() -> bool:
+    """Last resort: launch the plugin detached, the way the session would."""
+    if not Path(MEDIA_KEYS_BINARY).exists():
+        return False
+    try:
+        subprocess.Popen(  # noqa: S603 - fixed, absolute path
+            [MEDIA_KEYS_BINARY],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        log.debug("could not start %s: %s", MEDIA_KEYS_BINARY, exc)
+        return False
+    return True
+
+
+def _touch_keybindings(runner: Runner) -> bool:
+    """Re-write the binding list so the plugin notices and re-reads it.
+
+    The list is written twice (with and without our own path); the plugin
+    treats the second write as a change and reloads binding/command. Nothing
+    is killed, so a failure here cannot cost the user their shortcuts.
+    """
+    paths = parse_list(get_value(SCHEMA, KEY, runner=runner))
+    if not paths:
+        return False
+    if KEY_PATH in paths:
+        reduced = [path for path in paths if path != KEY_PATH]
+        if set_value_checked(SCHEMA, KEY, format_list(reduced), runner=runner):
+            return False
+    return set_value_checked(SCHEMA, KEY, format_list(paths), runner=runner) is None
 
 
 def _run_quiet(runner: Runner, command: Sequence[str]) -> subprocess.CompletedProcess | None:
@@ -350,7 +402,7 @@ def _run_quiet(runner: Runner, command: Sequence[str]) -> subprocess.CompletedPr
 
 
 def _media_keys_alive(runner: Runner) -> bool:
-    result = _run_quiet(runner, ["pgrep", "-f", "gsd-media-keys"])
+    result = _run_quiet(runner, ["pgrep", "-x", "gsd-media-keys"])
     return bool(result is not None and result.returncode == 0)
 
 

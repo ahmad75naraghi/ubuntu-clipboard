@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.7] — 2026-09-19
+
+### Fixed
+
+- Installing the shortcut no longer kills `gsd-media-keys`. Ubuntu 24.04 both
+  refuses `systemctl --user restart` for that unit ("may be requested by
+  dependency only") *and* refuses to hand the plugin back, so the old reload
+  could leave the whole desktop without any keyboard shortcut. A running
+  plugin is now asked to reload by re-writing the list it watches, and a dead
+  one is started again (D-Bus activation, then `/usr/libexec/gsd-media-keys`),
+  with the result verified before anything is reported.
+- `--diagnose` prints every custom shortcut with its key and command and flags
+  the ones whose program is gone. The dead `/usr/bin/diodon %f` entry that had
+  `<Super>v` was the actual reason Win+V did nothing, and it was invisible.
+- `pgrep -x` instead of `pgrep -f`, so a tool command line that merely mentions
+  a clipboard manager is no longer counted as one running.
+
 ## [2.0.6] — 2026-09-19
 
 ### Fixed
@@ -177,6 +194,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.7]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.6...v2.0.7
 [2.0.6]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.5...v2.0.6
 [2.0.5]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.4...v2.0.5
 [2.0.4]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.3...v2.0.4
