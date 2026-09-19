@@ -1,0 +1,159 @@
+/* ubuntu-clipboard — Windows 11 acrylic style for GTK4/Adwaita */
+
+/* پنجره اصلی — شیشه‌ای و گرد */
+window.clipboard-window {
+  background-color: rgba(32, 33, 36, 0.88);
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.06) inset;
+}
+
+window.clipboard-window.light {
+  background-color: rgba(243, 243, 243, 0.92);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* هدر */
+.header {
+  padding: 14px 16px 10px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.header.light {
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.title-label {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+.subtitle-label {
+  font-size: 11px;
+  opacity: 0.6;
+}
+.search-entry {
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: white;
+}
+.search-entry.light {
+  background: rgba(0,0,0,0.04);
+  color: #1a1a1a;
+}
+.search-entry:focus {
+  border-color: #4f7cff;
+  box-shadow: 0 0 0 2px rgba(79,124,255,0.25);
+}
+
+/* کارت آیتم — دقیقا مثل ویندوز */
+.item-card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 4px 8px;
+  transition: all 120ms ease;
+}
+.item-card:hover {
+  background: rgba(255,255,255,0.09);
+  border-color: rgba(255,255,255,0.12);
+}
+.item-card.selected {
+  background: rgba(79,124,255,0.18);
+  border-color: rgba(79,124,255,0.45);
+  box-shadow: 0 0 0 1px rgba(79,124,255,0.25) inset;
+}
+.item-card.pinned {
+  border-left: 3px solid #4f7cff;
+}
+.item-card.light {
+  background: white;
+  border: 1px solid rgba(0,0,0,0.06);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.item-card.light:hover {
+  border-color: rgba(0,0,0,0.10);
+}
+.preview-label {
+  font-size: 13px;
+  line-height: 18px;
+  color: rgba(255,255,255,0.92);
+}
+.preview-label.light {
+  color: #1f1f1f;
+}
+.meta-label {
+  font-size: 10.5px;
+  opacity: 0.55;
+}
+.type-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.09);
+  color: rgba(255,255,255,0.75);
+}
+.type-badge.text { background: rgba(79,124,255,0.22); color: #a8beff; }
+.type-badge.image { background: rgba(52,199,89,0.20); color: #8ee0a0; }
+.type-badge.code { background: rgba(255,159,10,0.20); color: #ffcc66; }
+.type-badge.link { background: rgba(0,199,190,0.20); color: #7fe8e2; }
+.type-badge.file { background: rgba(175,82,222,0.20); color: #d9a6ff; }
+.type-badge.color { background: rgba(255,45,85,0.20); color: #ff8da1; }
+
+/* دکمه‌ها */
+.icon-btn {
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 28px;
+  min-height: 28px;
+  background: transparent;
+  border: none;
+  opacity: 0.75;
+}
+.icon-btn:hover {
+  background: rgba(255,255,255,0.09);
+  opacity: 1;
+}
+.icon-btn.pinned-active {
+  background: rgba(79,124,255,0.22);
+  color: #4f7cff;
+  opacity: 1;
+}
+
+/* فوتر */
+.footer {
+  padding: 10px 16px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 11px;
+  opacity: 0.55;
+}
+.empty-state {
+  padding: 48px 24px;
+  opacity: 0.7;
+}
+.empty-icon {
+  font-size: 38px;
+  margin-bottom: 12px;
+}
+.clear-btn {
+  background: rgba(255,255,255,0.08);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.clear-btn:hover {
+  background: rgba(255,69,58,0.18);
+  color: #ff6b6b;
+}
+.pin-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  opacity: 0.5;
+  padding: 10px 16px 4px 16px;
+}

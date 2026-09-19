@@ -1,0 +1,32 @@
+[Desktop Entry]
+Name=Clipboard
+Name[fa]=کلیپ‌بورد
+Comment=Windows-like Clipboard for Ubuntu — Win+V (هر Win+V یک پنجره مستقل)
+Comment[fa]=کلیپ‌بورد حرفه‌ای شبیه ویندوز — Win+V
+Exec=ubuntu-clipboard
+Icon=ubuntu-clipboard
+Terminal=false
+Type=Application
+Categories=Utility;GTK;
+StartupNotify=true
+Keywords=clipboard;win+v;paste;history;
+StartupWMClass=com.ubuntu.clipboard.window
+Actions=Open;Settings;Status;
+
+[Desktop Action Open]
+Name=Open Clipboard
+Name[fa]=باز کردن کلیپ‌بورد
+Exec=ubuntu-clipboard --toggle
+OnlyShowIn=GNOME;Unity;
+
+[Desktop Action Settings]
+Name=Settings
+Name[fa]=تنظیمات
+Exec=ubuntu-clipboard --settings
+OnlyShowIn=GNOME;Unity;
+
+[Desktop Action Status]
+Name=Status
+Name[fa]=وضعیت
+Exec=ubuntu-clipboard --status
+OnlyShowIn=GNOME;Unity;
