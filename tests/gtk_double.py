@@ -16,10 +16,12 @@ PyGObject stubs.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 MODULES = ("gi", "gi.repository")
 
@@ -818,6 +820,16 @@ def _build_adw() -> types.ModuleType:
     return module
 
 
+class _CommandLine:
+    """Stand-in for ``Gio.ApplicationCommandLine``."""
+
+    def __init__(self, arguments) -> None:
+        object.__setattr__(self, "_arguments", list(arguments))
+
+    def get_arguments(self) -> list[str]:
+        return list(self._arguments)
+
+
 class _ApplicationBase:
     def __init__(self, **kwargs) -> None:
         for key, value in kwargs.items():
@@ -851,6 +863,22 @@ class _ApplicationBase:
     def quit(self) -> None:
         pass
 
+    def run(self, argv=None) -> int:
+        """Emulate ``GApplication.run()``: startup, one command, shutdown."""
+        arguments = list(argv or ["ubuntu-clipboard"])
+        self.do_startup()
+        code = 0
+        try:
+            handler = getattr(self, "do_command_line", None) if len(arguments) > 1 else None
+            if handler is not None:
+                code = handler(_CommandLine(arguments)) or 0
+            else:
+                activate = getattr(self, "do_activate", None)
+                code = (activate() or 0) if activate is not None else 0
+        finally:
+            self.do_shutdown()
+        return code
+
 
 #: Modules that bind GTK objects at import time and must be re-imported with the
 #: double. Pure modules (config, models, storage, i18n) are deliberately kept so
@@ -864,11 +892,8 @@ def _purge_project_modules() -> None:
             del sys.modules[name]
 
 
-@contextmanager
-def gtk_double() -> Iterator[object]:
-    """Install the doubles for the duration of the block."""
-    gi_module = types.ModuleType("gi")
-    gi_module.require_version = lambda *args: None
+def build_repository() -> types.ModuleType:
+    """Build the ``gi.repository`` module object holding all the doubles."""
     repository = types.ModuleType("gi.repository")
     repository.Gtk = _build_gtk()
     repository.Gdk = _build_gdk()
@@ -876,6 +901,64 @@ def gtk_double() -> Iterator[object]:
     repository.Gio = _build_gio()
     repository.Adw = _build_adw()
     repository.Pango = types.SimpleNamespace(EllipsizeMode=_EllipsizeMode, WrapMode=_WrapMode)
+    return repository
+
+
+#: Written by :func:`install_double_package`; it lets a *fresh* interpreter import
+#: the doubles, so the real entry points can be run as subprocesses in tests.
+_PACKAGE_SOURCE = '''"""Auto generated stand-in for PyGObject (see tests/gtk_double.py)."""
+
+import sys
+
+_REPOSITORY_ROOT = {repository_root!r}
+# Append (never prepend): an installed copy of the package must win over the
+# source checkout this shim lives in.
+if _REPOSITORY_ROOT not in sys.path:
+    sys.path.append(_REPOSITORY_ROOT)
+
+from tests import gtk_double  # noqa: E402
+
+repository = gtk_double.build_repository()
+sys.modules["gi.repository"] = repository
+
+
+def require_version(*_args, **_kwargs) -> None:
+    """Accept every ``gi.require_version`` call, as a real GTK install would."""
+
+
+gtk_double.seed_clipboard(repository, text={clipboard_text!r})
+'''
+
+
+def seed_clipboard(repository: types.ModuleType, *, text=None, texture=None, files=()) -> object:
+    """Give a repository a default display whose clipboard holds this payload."""
+    clipboard = FakeClipboard(text=text, texture=texture, files=files)
+    repository.Gdk.Display.clipboard = clipboard
+    return clipboard
+
+
+def install_double_package(directory: str | os.PathLike[str], clipboard_text: str | None = None) -> Path:
+    """Write a ``gi`` package into ``directory`` and return it, for ``PYTHONPATH``.
+
+    The package is self contained: it points back at this file, so a new
+    interpreter can run the whole application with the doubles instead of a
+    real PyGObject installation. Pass ``clipboard_text`` to start that
+    interpreter with something already on the (fake) clipboard.
+    """
+    package = Path(directory) / "gi"
+    package.mkdir(parents=True, exist_ok=True)
+    root = str(Path(__file__).resolve().parent.parent)
+    source = _PACKAGE_SOURCE.format(repository_root=root, clipboard_text=clipboard_text)
+    (package / "__init__.py").write_text(source, encoding="utf-8")
+    return package.parent
+
+
+@contextmanager
+def gtk_double() -> Iterator[object]:
+    """Install the doubles for the duration of the block."""
+    gi_module = types.ModuleType("gi")
+    gi_module.require_version = lambda *args: None
+    repository = build_repository()
     gi_module.repository = repository
 
     saved = {name: sys.modules.get(name) for name in MODULES}

@@ -35,9 +35,13 @@ make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw (نیاز ب�
 * `tests/test_ui.py` و `tests/test_app.py` — منطق رابط کاربری، تنظیمات، مانیتور کلیپ‌بورد
   و منطق برنامه روی `tests/gtk_double.py`، یک جایگزین سبک GTK. اگر کلاس یا متدی از
   GTK لازم شد، آن را به `gtk_double.py` اضافه کنید (به‌جای mock سراسری).
+* `tests/test_entrypoints.py` — برنامه را در یک **مفسر تازه** (`python -m ubuntu_clipboard`)
+  با همان `gi` جعلی روی `PYTHONPATH` اجرا می‌کند؛ این‌جا مسیر واقعی entry point، چرخهٔ
+  `Gtk.Application` و فایل‌های نوشته‌شده زیر `$XDG_*` آزموده می‌شوند.
 
-پیش از هر Pull Request باید این چهار مورد بدون خطا اجرا شوند. CI هم همین‌ها را
-روی Python 3.10، 3.12 و 3.13 اجرا می‌کند.
+پیش از هر Pull Request باید این چهار مورد بدون خطا اجرا شوند. CI همین‌ها را روی
+Python 3.10، 3.12 و 3.13 اجرا می‌کند و در یک job جدا هم sdist/wheel را می‌سازد،
+داده‌های بسته (`ui/styles.css` و آیکون hicolor) را بررسی و نسخهٔ نصب‌شده را اجرا می‌کند.
 
 ## قواعد کد
 

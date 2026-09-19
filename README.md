@@ -6,7 +6,7 @@
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-265%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-276%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -251,7 +251,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۲۶۵ تست
+└── test_*.py        # ۲۷۶ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -297,14 +297,14 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۲۶۵ تست
+make test        # ۲۷۶ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
 make run         # python3 -m ubuntu_clipboard --toggle
 ```
 
-چون محیط توسعه و CI نمایشگر ندارند، درستی کار با GTK دو لایه تأیید می‌شود:
+چون محیط توسعه و CI نمایشگر ندارند، درستی کار با GTK سه لایه تأیید می‌شود:
 
 1. **بررسی استاتیک** (`scripts/check_gtk_api.py`) نام‌های `Gtk.*`/`Gdk.*`/`Adw.*` و
    متدهای هر کلاس را با stubهای PyGObject مقایسه می‌کند؛ مثلاً `Gdk.ToplevelState.ACTIVE`
@@ -312,6 +312,10 @@ make run         # python3 -m ubuntu_clipboard --toggle
 2. **تست‌های UI** (`tests/gtk_double.py`) یک جایگزین سبک برای GTK هستند تا منطق پنجره،
    تنظیمات، مانیتور کلیپ‌بورد و منطق برنامه بدون نمایشگر تست شود (کلیک، کلیدها،
    سنجاق، جستجو، فوکوس، نوتفیکیشن و ...).
+3. **تست‌های سرتاسری** (`tests/test_entrypoints.py`) همان `gi` جعلی را روی `PYTHONPATH`
+   می‌گذارند و برنامه را در یک **مفسر تازه** با `python -m ubuntu_clipboard` و
+   اسکریپت‌های نصب‌شده اجرا می‌کنند؛ بنابراین ترتیب import، پارس آرگومان‌ها، چرخهٔ
+   `Gtk.Application` و فایل‌های نوشته‌شده زیر `$XDG_*` هم واقعاً آزموده می‌شوند.
 
 ساختار تست‌ها: هر ماژول یک فایل `tests/test_*.py` با home مجزا (متغیرهای `XDG_*`
 موقت) و بدون نیاز به شبکه، نمایشگر یا سرویس خارجی.
@@ -386,7 +390,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 265 headless
+module outside `ui/` is importable without a display, which is what the 276 headless
 tests exercise.
 
 ```bash
