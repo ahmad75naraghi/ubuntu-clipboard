@@ -546,3 +546,193 @@ def test_daemon_log_reads_the_media_keys_unit(monkeypatch):
     monkeypatch.setattr(shortcut.shutil, "which", lambda name: f"/usr/bin/{name}")
     assert shortcut.daemon_log(runner=runner) == ["line one", "line two"]
     assert shortcut.MEDIA_KEYS_UNIT in calls[0]
+
+
+# ── one shortcut per keyboard layout ───────────────────────────────────────
+SOURCES_KEY = "org.gnome.desktop.input-sources|sources"
+TWO_LAYOUTS = "[('xkb', 'us'), ('xkb', 'ir')]"
+V_KEY = 47 + 8
+SYM_V = 0x0076
+SYM_ARABIC_RA = 0x05D1
+
+
+class FakeKeymap:
+    """libxkbcommon stand-in: ``us`` types v, ``ir`` types ر on the same key."""
+
+    def keysym(self, layout, _variant, keycode):
+        if keycode != V_KEY:
+            return 0
+        return SYM_V if layout == "us" else SYM_ARABIC_RA
+
+    def name(self, sym):
+        return {SYM_V: "v", SYM_ARABIC_RA: "Arabic_ra"}.get(sym, "")
+
+    def character(self, sym):
+        return {SYM_ARABIC_RA: "ر"}.get(sym, "")
+
+
+def with_persian_layout(monkeypatch, values=None) -> None:
+    monkeypatch.setattr("ubuntu_clipboard.keymap.default_backend", lambda: FakeKeymap())
+    monkeypatch.setattr("ubuntu_clipboard.keymap.layout_display_name", lambda layout, *_: "Persian")
+
+
+def test_install_registers_a_slot_for_every_layout(fake_gsettings, monkeypatch):
+    fake = fake_gsettings({SOURCES_KEY: TWO_LAYOUTS})
+    with_persian_layout(monkeypatch)
+    report = shortcut.install(runner=fake, reload_daemon=False)
+
+    first, second = shortcut.slot_path(0), shortcut.slot_path(1)
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == f"['{first}', '{second}']"
+    assert shortcut.unquote(fake.values[f"{shortcut.CHILD_SCHEMA}:{second}|binding"]) == "<Super>Arabic_ra"
+    assert "Persian" in fake.values[f"{shortcut.CHILD_SCHEMA}:{second}|name"]
+    assert (
+        fake.values[f"{shortcut.CHILD_SCHEMA}:{second}|command"]
+        == fake.values[f"{shortcut.CHILD_SCHEMA}:{first}|command"]
+    )
+    assert report.bindings == ["<Super>v", "<Super>Arabic_ra"]
+    assert any("other keyboard layouts" in message for message in report.messages)
+
+
+def test_a_single_layout_still_registers_one_slot(fake_gsettings, monkeypatch):
+    fake = fake_gsettings({SOURCES_KEY: "[('xkb', 'us')]"})
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == f"['{shortcut.KEY_PATH}']"
+
+
+def test_install_drops_the_slot_of_a_removed_layout(fake_gsettings, monkeypatch):
+    stale = shortcut.slot_path(1)
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{shortcut.KEY_PATH}', '{stale}']",
+            f"{shortcut.CHILD_SCHEMA}:{stale}|command": "'/usr/bin/ubuntu-clipboard --toggle'",
+        }
+    )
+    with_persian_layout(monkeypatch)  # the user removed the Persian layout meanwhile
+    report = shortcut.install(runner=fake, reload_daemon=False)
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == f"['{shortcut.KEY_PATH}']"
+    assert stale in report.removed
+
+
+def test_extra_bindings_can_be_given_by_hand(fake_gsettings):
+    fake = fake_gsettings()
+    report = shortcut.install(extra_bindings=["<Super>ر"], runner=fake, reload_daemon=False)
+    assert report.bindings == ["<Super>v", "<Super>ر"]
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == (
+        f"['{shortcut.slot_path(0)}', '{shortcut.slot_path(1)}']"
+    )
+    assert "ر" in fake.values[f"{shortcut.CHILD_SCHEMA}:{shortcut.slot_path(1)}|name"]
+
+
+def test_status_reports_every_binding(fake_gsettings, monkeypatch):
+    fake = fake_gsettings({SOURCES_KEY: TWO_LAYOUTS})
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    assert shortcut.status(runner=fake)["bindings"] == ["<Super>v", "<Super>Arabic_ra"]
+
+
+def test_uninstall_removes_every_slot(fake_gsettings, monkeypatch):
+    fake = fake_gsettings({SOURCES_KEY: TWO_LAYOUTS})
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    shortcut.uninstall(runner=fake)
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"] == "@as []"
+
+
+def test_a_clash_on_a_layout_binding_is_reported(fake_gsettings):
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom3/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>ر'",
+            f"{shortcut.CHILD_SCHEMA}:{other}|command": "'/usr/bin/other'",
+        }
+    )
+    report = shortcut.install(extra_bindings=["<Super>ر"], runner=fake, reload_daemon=False)
+    assert any("custom3" in clash for clash in report.clashing)
+    assert fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"].count(other) == 1  # never taken silently
+
+
+def test_a_dropped_slot_leaves_nothing_behind(fake_gsettings, monkeypatch):
+    """An uninstalled layout must not keep its keys in dconf either."""
+    stale = shortcut.slot_path(1)
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{shortcut.KEY_PATH}', '{stale}']",
+            f"{shortcut.CHILD_SCHEMA}:{stale}|command": "'/usr/bin/ubuntu-clipboard --toggle'",
+            f"{shortcut.CHILD_SCHEMA}:{stale}|binding": "'<Super>Arabic_ra'",
+            f"{shortcut.CHILD_SCHEMA}:{stale}|name": "'Clipboard — Win+V (Persian)'",
+        }
+    )
+    with_persian_layout(monkeypatch)  # the Persian layout is gone now
+    shortcut.install(runner=fake, reload_daemon=False)
+    assert not [key for key in fake.values if stale in key]
+    assert any("reset" in " ".join(call) for call in fake.calls)
+
+
+def test_uninstall_clears_our_own_slots(fake_gsettings, monkeypatch):
+    fake = fake_gsettings({SOURCES_KEY: TWO_LAYOUTS})
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    shortcut.uninstall(runner=fake)
+    assert not [key for key in fake.values if "ubuntu-clipboard" in key]
+
+
+def test_a_hand_made_shortcut_is_never_emptied(fake_gsettings, monkeypatch):
+    """A shortcut the user wrote by hand stays theirs, keys and all."""
+    mine = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom2/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{mine}']",
+            f"{shortcut.CHILD_SCHEMA}:{mine}|command": "'/usr/bin/ubuntu-clipboard --toggle'",
+            f"{shortcut.CHILD_SCHEMA}:{mine}|binding": "'<Super>b'",
+            f"{shortcut.CHILD_SCHEMA}:{mine}|name": "'My own clipboard key'",
+        }
+    )
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    assert f"{shortcut.CHILD_SCHEMA}:{mine}|name" in fake.values
+    assert fake.values[f"{shortcut.CHILD_SCHEMA}:{mine}|binding"] == "'<Super>b'"
+
+
+def test_reinstalling_changes_nothing(fake_gsettings, monkeypatch):
+    """Running the installer again must not add a second copy of anything."""
+    fake = fake_gsettings({SOURCES_KEY: TWO_LAYOUTS})
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    first = dict(fake.values)
+    shortcut.install(runner=fake, reload_daemon=False)
+    assert fake.values == first
+
+
+def test_the_slot_count_is_bounded(fake_gsettings, monkeypatch):
+    """A machine with a dozen layouts still gets a sane number of slots."""
+    many = "[" + ", ".join(f"('xkb', 'L{index}')" for index in range(12)) + "]"
+    fake = fake_gsettings({SOURCES_KEY: many})
+
+    class ManyLayouts:
+        """Every layout types a different key on the V position."""
+
+        def keysym(self, layout, _variant, keycode):
+            return SYM_V if layout == "us" else 0x1000 + int(layout[1:])
+
+        def name(self, sym):
+            return "v" if sym == SYM_V else f"key{sym:04x}"
+
+        def character(self, _sym):
+            return ""
+
+    monkeypatch.setattr("ubuntu_clipboard.keymap.default_backend", ManyLayouts)
+    monkeypatch.setattr("ubuntu_clipboard.keymap.layout_display_name", lambda layout, *_: layout)
+    report = shortcut.install(runner=fake, reload_daemon=False)
+    assert len(report.bindings) == shortcut.MAX_EXTRA_SLOTS + 1
+    assert len(set(report.bindings)) == len(report.bindings)  # one slot per key
+
+
+def test_uninstall_also_clears_the_extra_slots(fake_gsettings, monkeypatch):
+    fake = fake_gsettings({SOURCES_KEY: TWO_LAYOUTS})
+    with_persian_layout(monkeypatch)
+    shortcut.install(runner=fake, reload_daemon=False)
+    assert any("ubuntu-clipboard-1" in key for key in fake.values)
+    shortcut.uninstall(runner=fake)
+    assert not [key for key in fake.values if "ubuntu-clipboard" in key]

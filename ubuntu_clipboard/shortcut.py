@@ -20,6 +20,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .keymap import LayoutBinding, binding_plan, configured_layouts, describe, split_accelerator
+
 log = logging.getLogger(__name__)
 
 SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
@@ -33,6 +35,23 @@ BASE_PATH = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
 SLOT = "ubuntu-clipboard"
 KEY_PATH = f"{BASE_PATH}{SLOT}/"
 DEFAULT_BINDING = "<Super>v"
+#: A shortcut is matched against the keysym of the *active* layout, so one slot
+#: per keyboard layout is registered: the Latin ``<Super>v`` plus the same key
+#: as the other layouts name it (see :mod:`ubuntu_clipboard.keymap`).
+MAX_EXTRA_SLOTS = 8
+
+
+def slot_path(index: int) -> str:
+    """``0`` -> our main slot, ``1``… -> one extra slot per keyboard layout."""
+    return KEY_PATH if index == 0 else f"{BASE_PATH}{SLOT}-{index}/"
+
+
+def slot_name(index: int, layout: str | None = None) -> str:
+    """Name shown in Settings → Keyboard → Custom Shortcuts."""
+    if index == 0 or not layout:
+        return "Clipboard — Win+V"
+    return f"Clipboard — Win+V ({layout})"
+
 
 SHELL_SCHEMA = "org.gnome.shell.keybindings"
 SHELL_TOGGLE_KEY = "toggle-message-tray"
@@ -89,6 +108,8 @@ class Report:
 
     ok: bool = False
     binding: str = DEFAULT_BINDING
+    #: Every binding we registered, one per keyboard layout (``binding`` first).
+    bindings: list[str] = field(default_factory=list)
     command: str = ""
     removed: list[str] = field(default_factory=list)
     disabled: list[str] = field(default_factory=list)
@@ -140,6 +161,56 @@ def get_value(
     if result is None or result.returncode != 0:
         return None
     return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+def reset_value(
+    schema: str, key: str, path: str | None = None, runner: Runner = subprocess.run
+) -> str | None:
+    """Drop a key back to its schema default; ``None`` on success."""
+    target = f"{schema}:{path}" if path else schema
+    try:
+        result = runner(
+            ["gsettings", "reset", target, key],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=SET_TIMEOUT,
+            check=False,
+        )
+    except FileNotFoundError:
+        return "gsettings is not installed"
+    except subprocess.TimeoutExpired:
+        return f"gsettings did not answer within {SET_TIMEOUT:g}s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"gsettings could not be run: {exc}"
+    if result is None:
+        return "gsettings could not be run"
+    if result.returncode == 0:
+        return None
+    message = result.stderr.decode("utf-8", errors="replace").strip()
+    return message or f"gsettings exited with status {result.returncode}"
+
+
+def is_our_slot(path: str) -> bool:
+    """True only for slot paths this program creates for itself.
+
+    A hand-made shortcut that happens to run our command is the user's, and is
+    never edited or emptied by us — only its entry in the keybinding list is
+    ours to remove.
+    """
+    return path in {slot_path(index) for index in range(MAX_EXTRA_SLOTS + 1)}
+
+
+def forget_slots(paths: Sequence[str], runner: Runner = subprocess.run) -> list[str]:
+    """Clear the keys of our own slots, so an uninstall leaves nothing behind."""
+    cleared = []
+    for path in paths:
+        if not is_our_slot(path):
+            continue
+        if all(
+            reset_value(CHILD_SCHEMA, key, path, runner) is None for key in ("name", "command", "binding")
+        ):
+            cleared.append(path)
+    return cleared
 
 
 def set_value_checked(
@@ -452,18 +523,26 @@ def status(runner: Runner = subprocess.run) -> dict[str, object]:
     """Current state of our shortcut, used by ``--status``."""
     raw = get_value(SCHEMA, KEY, runner=runner)
     paths = parse_list(raw)
+    registered = [path for path in paths if path == KEY_PATH or owns_binding(path, runner)]
     return {
         "registered_paths": paths,
         "ours_listed": KEY_PATH in paths,
         "name": get_value(CHILD_SCHEMA, "name", KEY_PATH, runner),
         "command": get_value(CHILD_SCHEMA, "command", KEY_PATH, runner),
         "binding": get_value(CHILD_SCHEMA, "binding", KEY_PATH, runner),
+        # Every slot of ours, in the order GNOME sees them.
+        "bindings": [
+            binding
+            for path in registered
+            if (binding := unquote(get_value(CHILD_SCHEMA, "binding", path, runner)))
+        ],
     }
 
 
 def install(
     *,
     binding: str = DEFAULT_BINDING,
+    extra_bindings: Sequence[str] | None = None,
     launch_command: Sequence[str] | None = None,
     runner: Runner = subprocess.run,
     unbind_conflicts: bool = True,
@@ -471,6 +550,11 @@ def install(
     reload_daemon: bool = True,
 ) -> Report:
     """Register ``Win+V`` for this application. Idempotent.
+
+    ``extra_bindings`` are the same key as the user's *other* keyboard layouts
+    name it (Persian ``ر``, Russian ``м``, …), so the shortcut keeps working
+    after a layout switch. They are computed from the session's layouts unless
+    the caller passes them in, and ``binding`` always stays the first slot.
 
     ``take_binding`` also removes *other* custom shortcuts that already use
     the same key. They are the user's, so this only happens on request
@@ -482,16 +566,35 @@ def install(
     if not gsettings_available():
         raise ShortcutError("gsettings not found — this is not a GNOME session")
 
-    values = (
-        ("name", quote("Clipboard — Win+V")),
-        ("command", quote(report.command)),
-        ("binding", quote(binding)),
-    )
-    failures = [
-        f"{key} = {value} ({error})"
-        for key, value in values
-        if (error := set_value_checked(CHILD_SCHEMA, key, value, KEY_PATH, runner))
-    ]
+    # The layouts come from gsettings too: read them through the same runner the
+    # caller handed us, so a test (or a dry run) never talks to the real session.
+    layouts = configured_layouts(lambda schema, key: get_value(schema, key, runner=runner))
+    plan = binding_plan(binding, layouts=layouts)
+    if extra_bindings is not None:
+        # An explicit list wins (tests, and anyone who wants to pick by hand).
+        plan = (
+            plan[:1]
+            + [LayoutBinding(extra) for extra in extra_bindings if extra != binding][:MAX_EXTRA_SLOTS]
+        )
+    plan = plan[: MAX_EXTRA_SLOTS + 1]
+    bindings = [item.accelerator for item in plan]
+    report.bindings = bindings
+
+    failures: list[str] = []
+    for index, item in enumerate(plan):
+        # The layout's name for the settings list; a hand-picked extra binding
+        # has none, so it is labelled with the key it answers to.
+        label = item.layout or (split_accelerator(item.accelerator)[1] if index else "")
+        values = (
+            ("name", quote(slot_name(index, label or None))),
+            ("command", quote(report.command)),
+            ("binding", quote(item.accelerator)),
+        )
+        failures += [
+            f"{key} = {value} ({error})"
+            for key, value in values
+            if (error := set_value_checked(CHILD_SCHEMA, key, value, slot_path(index), runner))
+        ]
     if failures:
         report.add("gsettings rejected " + "; ".join(failures))
         return report
@@ -501,15 +604,18 @@ def install(
     # Listing the path first made the plugin see an empty binding and register
     # nothing, which is how a "registered" shortcut could still do nothing.
     paths = parse_list(get_value(SCHEMA, KEY, runner=runner))
-    # De-duplicate: drop other slots that already point at us.
+    ours = [slot_path(index) for index in range(len(bindings))]
+    # De-duplicate: drop other slots that already point at us (older installs
+    # and slots for a layout the user has removed since).
     keep: list[str] = []
     for path in paths:
-        if path != KEY_PATH and owns_binding(path, runner):
+        if path not in ours and owns_binding(path, runner):
             report.removed.append(path)
             continue
+        if path in ours:
+            continue
         keep.append(path)
-    if KEY_PATH not in keep:
-        keep.append(KEY_PATH)
+    keep.extend(ours)
     if keep != paths:
         error = set_value_checked(SCHEMA, KEY, format_list(keep), runner=runner)
         if error:
@@ -522,10 +628,13 @@ def install(
             report.add(f"disabled conflicting GNOME shortcut: {conflict}")
         else:
             report.add(f"warning: {conflict} also uses {binding} and may win")
+    forget_slots(report.removed, runner)
     if report.removed:
         report.add("removed duplicate bindings: " + ", ".join(report.removed))
     report.ok = True
     report.add(f"shortcut {binding} -> {report.command}")
+    if len(plan) > 1:
+        report.add(f"also registered for other keyboard layouts: {describe(plan[1:])}")
     foreign = foreign_bindings(binding, runner)
     if foreign and take_binding:
         for path in remove_paths([path for path, _command in foreign], runner):
@@ -533,6 +642,13 @@ def install(
             report.add(f"took {binding} over from {path}")
         foreign = foreign_bindings(binding, runner)
     report.clashing = [describe_foreign(path, command) for path, command in foreign]
+    for extra in bindings[1:]:
+        # A clash on a layout binding is worth reporting, but it is never taken
+        # over silently either: only the user knows whether it matters.
+        report.clashing += [
+            f"{describe_foreign(path, command)} — {extra}"
+            for path, command in foreign_bindings(extra, runner)
+        ]
     for path, command in foreign:
         message = (
             f"warning: {describe_foreign(path, command)} also answers to {binding} and may "
@@ -573,6 +689,7 @@ def uninstall(runner: Runner = subprocess.run) -> Report:
     if keep != paths and not set_value(SCHEMA, KEY, format_list(keep), runner=runner):
         report.add("could not update the keybinding list")
         return report
+    forget_slots(report.removed, runner)
     # Give GNOME's notification tray shortcut back, but only when it is empty —
     # we must not overwrite a binding the user chose themselves.
     current = get_value(SHELL_SCHEMA, SHELL_TOGGLE_KEY, runner=runner)

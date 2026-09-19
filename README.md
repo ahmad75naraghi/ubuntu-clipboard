@@ -2,11 +2,11 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.1.3-blue)
+![Version](https://img.shields.io/badge/version-2.1.4-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-382%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-422%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -134,6 +134,29 @@ python3 -m ubuntu_clipboard --toggle       # باز/بسته کردن پنجره
 با برداشتن فوکوس، پنجره به‌طور خودکار بسته می‌شود
 (قابل خاموش‌کردن با `close_on_focus_loss`).
 
+### Win+V در چیدمان‌های دیگر (فارسی، عربی، روسی …)
+
+گنوم میانبر را با کلیدِ **چیدمان فعال** تطبیق می‌دهد. در چیدمان فارسی، همان کلید فیزیکی
+`V` کاراکتر «ر» می‌فرستد و `<Super>v` هیچ‌وقت فعال نمی‌شد. هنگام نصب، جای فیزیکی همان
+کلید در همهٔ چیدمان‌های تنظیم‌شده خوانده می‌شود (`libxkbcommon`) و برای هر چیدمانی که
+کلیدش فرق دارد یک میانبر جدا ثبت می‌شود:
+
+| چیدمان | میانبر ثبت‌شده | نام در تنظیمات |
+|---|---|---|
+| English (US) | `<Super>v` | Clipboard — Win+V |
+| Persian | `<Super>Arabic_ra` | Clipboard — Win+V (Persian) |
+
+پس Win+V در هر دو چیدمان همان کلید فیزیکی است و لازم نیست چیدمان را عوض کنید.
+
+```bash
+ubuntu-clipboard --status       # خط «layouts»: همهٔ میانبرهای ثبت‌شده
+ubuntu-clipboard --diagnose     # «keyboard layouts» و «needed for them»
+```
+
+نصب دوباره چیزی را تکراری نمی‌کند، میانبرِ چیدمانی که حذف کرده‌اید خودش پاک می‌شود و
+`--remove-shortcut` همهٔ اسلات‌ها را برمی‌دارد. میانبرهایی که خودتان ساخته‌اید
+هیچ‌وقت دست‌کاری نمی‌شوند.
+
 ---
 
 ## ⌨️ خط فرمان
@@ -177,7 +200,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.1.3
+Ubuntu Clipboard 2.1.4
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -194,6 +217,7 @@ Ubuntu Clipboard 2.1.3
   tools            wl-copy=yes, wl-paste=yes, xclip=yes, xsel=no, xdotool=yes, wtype=no, ydotool=no
   clipboard tools  readable / writable
   shortcut         '<Super>v' -> '/usr/bin/python3 -m ubuntu_clipboard --toggle'
+  layouts          <Super>v, <Super>Arabic_ra>
 ```
 
 ---
@@ -250,7 +274,8 @@ ubuntu_clipboard/
 ├── models.py        # تشخیص نوع محتوا، hash، پیش‌نمایش، زمان نسبی
 ├── clipboard.py     # تشخیص نشست و توانمندی‌های محیط (Wayland/X11، ابزارهای متن)
 ├── paste.py         # شبیه‌سازی Ctrl+V با ydotool/wtype/xdotool
-├── shortcut.py      # مدیریت میانبر GNOME با gsettings (بدون sed)
+├── shortcut.py      # مدیریت میانبر GNOME با gsettings (بدون sed) + یک اسلات برای هر چیدمان
+├── keymap.py        # جای کلید در هر چیدمان صفحه‌کلید (libxkbcommon) برای Win+V در فارسی
 ├── install.py       # میان‌بر دسکتاپ، آیکون، autostart، پاک‌سازی نسخه ۱
 ├── config.py        # تنظیمات JSON + مسیرهای XDG + اعتبارسنجی + فیلتر محتوای حساس
 ├── i18n.py          # ترجمه فارسی/انگلیسی + تشخیص RTL
@@ -263,7 +288,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۸۲ تست
+└── test_*.py        # ۴۲۲ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -309,7 +334,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۸۲ تست
+make test        # ۴۲۲ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -349,6 +374,20 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 سرویس، ثبت بودن میانبر، وجود فایل فرمان، تداخل با میانبرهای دیگر یا میانبر پوستهٔ گنوم،
 زنده بودن `gsd-media-keys` و وضعیت چسباندن خودکار. در پایان فهرست مشکلات و سریع‌ترین
 راه‌حل‌ها را چاپ می‌کند.
+
+### Win+V در چیدمان فارسی کار نمی‌کند
+
+اگر روی چیدمان غیرلاتین Win+V پنجره را باز نمی‌کند، ببین برای آن چیدمان میانبری ثبت
+شده یا نه:
+
+```bash
+ubuntu-clipboard --status          # خط layouts باید بیش از یک میانبر نشان بدهد
+ubuntu-clipboard --diagnose        # «keyboard layouts» و «needed for them»
+ubuntu-clipboard --install-shortcut   # ثبت دوباره؛ میانبر چیدمان‌ها اضافه می‌شود
+```
+
+اگر روی نسخهٔ قدیمی‌تر از ۲٫۱٫۴ نصب کرده‌اید، فقط `<Super>v` ثبت شده بود و در چیدمان
+فارسی کلید «ر» می‌فرستاد؛ یک بار `--install-shortcut` کافی است.
 
 ### پنجره در داک اوبونتو دیده می‌شود
 
@@ -506,9 +545,10 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 382 headless
+module outside `ui/` is importable without a display, which is what the 422 headless
 tests exercise. The popup is kept out of the Ubuntu dock, and picking an item
-cancels any paste that is still on its way.
+cancels any paste that is still on its way. Shortcuts are registered per keyboard layout,
+so the same physical keys open it in Persian, Arabic or Russian as well.
 
 ```bash
 git clone https://github.com/ahmad75naraghi/ubuntu-clipboard.git

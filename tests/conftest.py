@@ -70,6 +70,7 @@ class FakeGsettings:
         {
             "org.gnome.settings-daemon.plugins.media-keys",
             "org.gnome.shell.keybindings",
+            "org.gnome.desktop.input-sources",
             *RELOCATABLE,
         }
     )
@@ -117,6 +118,11 @@ class FakeGsettings:
             if len(command) < 5:
                 return subprocess.CompletedProcess(command, 2, b"", b"missing value")
             self.values[lookup] = command[4]
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        if action == "reset":
+            # Real gsettings drops the value back to the schema default; the
+            # double forgets it, so a stale key can never look cleaned up.
+            self.values.pop(lookup, None)
             return subprocess.CompletedProcess(command, 0, b"", b"")
         return subprocess.CompletedProcess(command, 2, b"", b"unknown action")
 

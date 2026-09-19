@@ -285,6 +285,9 @@ def cmd_status(store: HistoryStore) -> int:
         command = shortcut_state.get("command") or "-"
         if shortcut_state.get("ours_listed"):
             print(f"  shortcut         {binding} -> {command}")
+            extra = [item for item in shortcut_state.get("bindings") or [] if item != binding]
+            if extra:
+                print(f"  layouts          {', '.join(extra)}")
         else:
             print("  shortcut         not registered — ubuntu-clipboard --install-shortcut")
     else:
@@ -601,11 +604,25 @@ def cmd_diagnose(config: Config) -> int:
             print(f"   in the list            {entry}{' (ours)' if entry == KEY_PATH else ''}")
         print(f"   binding                {binding or '-'}")
         print(f"   command                {command or '-'}")
+        from .keymap import binding_plan, configured_layouts, default_backend, describe
+
+        layouts = configured_layouts()
+        if layouts:
+            names = ", ".join(layout for layout, _variant in layouts)
+            plan = binding_plan(wanted)
+            if len(plan) > 1:
+                needed = describe(plan[1:])
+            elif len(layouts) > 1 and default_backend() is None:
+                needed = "unknown — libxkbcommon is missing (sudo apt install libxkbcommon0 xkb-data)"
+            else:
+                needed = "none — every layout sends the same key"
+            print(f"   keyboard layouts       {names}")
+            print(f"   needed for them        {needed}")
         if not listed:
             problems.append("our shortcut is not in the GNOME keybinding list")
         if binding and binding.strip("'") != wanted:
             print(f"   note                   the configured key is {wanted!r}")
-        program = _first_word(command.strip("'"))
+        program = _first_word((command or "").strip("'"))  # gsettings may answer nothing
         if program and not Path(program).exists():
             print(f"   command exists         NO — {program} is gone")
             problems.append("the shortcut runs a program that no longer exists")

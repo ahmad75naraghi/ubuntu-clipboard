@@ -4,6 +4,37 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.4] — 2026-09-19
+
+### Added
+
+- **Win+V now works in every keyboard layout.** GNOME matches a shortcut against
+  the keysym of the *active* layout, so with a Persian layout the same physical
+  key sends «ر» and `<Super>v` never fired. The installer looks the physical key
+  up in every configured layout (`libxkbcommon`, no hardcoded keysym) and
+  registers one extra custom shortcut for each layout whose key differs — e.g.
+  `Clipboard — Win+V (Persian)` on `<Super>Arabic_ra`. The layout list itself is
+  read through the same runner as the rest of the installer, at most eight extra
+  slots are written, and any failure falls back to the single binding that was
+  written before.
+- `--status` lists every binding in use, and `--diagnose` reports the configured
+  keyboard layouts together with the key each one needs (and says when
+  `libxkbcommon`/`xkb-data` is missing).
+
+### Fixed
+
+- Reinstalling after a layout was removed no longer leaves the extra slot behind:
+  the slot is dropped from the keybinding list *and* its `name`/`command`/`binding`
+  keys are reset, so an uninstall leaves nothing of ours in dconf. A shortcut the
+  user wrote by hand is never emptied — only our own slot paths are.
+- `--diagnose` no longer fails when the registered shortcut has no command.
+
+### Changed
+
+- The ctypes binding to `libxkbcommon` is exercised against a real shared
+  library (`tests/xkb_stub.c`, compiled by the suite): a wrong struct layout or
+  argument type can no longer hide behind a Python double.
+
 ## [2.1.3] — 2026-09-19
 
 ### Added
@@ -301,6 +332,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.1.4]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.3...v2.1.4
 [2.1.3]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.2...v2.1.3
 [2.1.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.1.0...v2.1.1

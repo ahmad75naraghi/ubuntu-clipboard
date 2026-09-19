@@ -574,3 +574,72 @@ def test_backend_label_explains_the_choice(monkeypatch):
     assert "kept out of the dock" in cli.display_backend_label()
     monkeypatch.setattr(cli, "display_backend", lambda *a, **k: "wayland")
     assert cli.display_backend_label() == "wayland"
+
+
+def test_diagnose_reports_the_key_of_every_layout(monkeypatch, capsys):
+    """With a Persian layout, <Super>v alone is not enough — say so out loud."""
+    from ubuntu_clipboard import keymap
+
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: True)
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.status",
+        lambda **_kwargs: {
+            "registered_paths": [cli.KEY_PATH],
+            "ours_listed": True,
+            "name": "'Clipboard — Win+V'",
+            "command": "'/usr/bin/ubuntu-clipboard --toggle'",
+            "binding": "'<Super>v'",
+        },
+    )
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.get_value", lambda *_a, **_k: f"['{cli.KEY_PATH}']")
+    monkeypatch.setattr(
+        "ubuntu_clipboard.keymap.configured_layouts", lambda *_a, **_k: [("us", ""), ("ir", "")]
+    )
+    monkeypatch.setattr("ubuntu_clipboard.keymap.default_backend", lambda: object())
+    monkeypatch.setattr(
+        "ubuntu_clipboard.keymap.binding_plan",
+        lambda primary, **_kwargs: [
+            keymap.LayoutBinding(primary),
+            keymap.LayoutBinding("<Super>Arabic_ra", "Persian"),
+        ],
+    )
+    assert cli.main(["--diagnose"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "keyboard layouts       us, ir" in out
+    assert "needed for them        <Super>Arabic_ra (Persian)" in out
+
+
+def test_diagnose_says_when_the_layout_cannot_be_read(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: True)
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.status",
+        lambda **_kwargs: {"registered_paths": [], "ours_listed": False, "binding": None, "command": None},
+    )
+    monkeypatch.setattr(
+        "ubuntu_clipboard.keymap.configured_layouts", lambda *_a, **_k: [("us", ""), ("ir", "")]
+    )
+    monkeypatch.setattr("ubuntu_clipboard.keymap.default_backend", lambda: None)
+    monkeypatch.setattr("ubuntu_clipboard.keymap.binding_plan", lambda primary, **_k: [])
+    assert cli.main(["--diagnose"]) == cli.EXIT_OK
+    assert "libxkbcommon is missing" in capsys.readouterr().out
+
+
+def test_status_lists_the_extra_layout_bindings(monkeypatch, capsys):
+    monkeypatch.setattr("ubuntu_clipboard.shortcut.gsettings_available", lambda: True)
+    monkeypatch.setattr(
+        "ubuntu_clipboard.shortcut.status",
+        lambda **_kwargs: {
+            "registered_paths": [
+                "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/"
+            ],
+            "ours_listed": True,
+            "name": "'Clipboard — Win+V'",
+            "command": "'ubuntu-clipboard --toggle'",
+            "binding": "'<Super>v'",
+            "bindings": ["<Super>v", "<Super>Arabic_ra"],
+        },
+    )
+    assert cli.main(["--status"]) == cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "<Super>Arabic_ra" in out
+    assert "layouts" in out
