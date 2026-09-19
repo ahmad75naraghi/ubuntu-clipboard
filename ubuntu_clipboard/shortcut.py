@@ -57,6 +57,8 @@ class Report:
     command: str = ""
     removed: list[str] = field(default_factory=list)
     disabled: list[str] = field(default_factory=list)
+    #: The user's own shortcuts that already use our binding (we never edit them).
+    clashing: list[str] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
 
     def add(self, message: str) -> None:
@@ -214,6 +216,33 @@ def conflicts(binding: str = DEFAULT_BINDING, runner: Runner = subprocess.run) -
     return found
 
 
+def unquote(value: str | None) -> str:
+    """``"'<Super>v'"`` -> ``"<Super>v"`` (gsettings prints GVariant strings)."""
+    if not value:
+        return ""
+    text = value.strip().lstrip("@as ")
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {"'", '"'}:
+        return text[1:-1]
+    return text
+
+
+def custom_conflicts(binding: str = DEFAULT_BINDING, runner: Runner = subprocess.run) -> list[str]:
+    """Other custom shortcuts (someone else's) already bound to ``binding``.
+
+    They are never edited: they belong to the user. The caller only warns, so
+    the reason Win+V seems to do nothing is visible instead of mysterious.
+    """
+    found: list[str] = []
+    for path in parse_list(get_value(SCHEMA, KEY, runner=runner)):
+        if path == KEY_PATH:
+            continue
+        if unquote(get_value(CHILD_SCHEMA, "binding", path, runner)) != binding:
+            continue
+        command = unquote(get_value(CHILD_SCHEMA, "command", path, runner))
+        found.append(f"{path} ({command})" if command else path)
+    return found
+
+
 def _disable_shell_conflict(runner: Runner) -> bool:
     return set_value(SHELL_SCHEMA, SHELL_TOGGLE_KEY, "@as []", runner=runner)
 
@@ -285,6 +314,12 @@ def install(
         report.add("removed duplicate bindings: " + ", ".join(report.removed))
     report.ok = True
     report.add(f"shortcut {binding} -> {report.command}")
+    report.clashing = custom_conflicts(binding, runner)
+    for clash in report.clashing:
+        report.add(
+            f"warning: {clash} already uses {binding} and may win — "
+            "remove it in Settings → Keyboard → Custom Shortcuts"
+        )
     return report
 
 

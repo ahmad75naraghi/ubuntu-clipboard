@@ -272,7 +272,7 @@ def install_all(
             result = install_shortcut(binding=shortcut_binding, launch_command=command)
             report.shortcut = result
             for message in result.messages:
-                if result.ok:
+                if result.ok and not message.startswith("warning:"):
                     report.did(message)
                 else:
                     report.warn(message)

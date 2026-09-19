@@ -283,10 +283,10 @@ def cmds_shortcut(install: bool) -> int:
     except ShortcutError as exc:
         print(f"  ! {exc}", file=sys.stderr)
         return EXIT_FAILURE
-    stream = sys.stdout if report.ok else sys.stderr
-    mark = "✓" if report.ok else "!"
     for message in report.messages:
-        print(f"  {mark} {message}", file=stream)
+        warning = not report.ok or message.startswith("warning:")
+        stream = sys.stderr if warning else sys.stdout
+        print(f"  {'!' if warning else '✓'} {message}", file=stream)
     if not report.ok:
         print(
             "  ! gsettings refused the keybinding — set it up by hand instead:"

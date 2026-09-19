@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] — 2026-09-19
+
+### Added
+
+- `--install-shortcut` (and `--install`) now warns when *another* custom
+  shortcut already uses the same key — the usual reason Win+V "does nothing"
+  even though our binding is registered. The user's entry is never modified;
+  the warning names the path and the command so it can be removed in
+  Settings → Keyboard → Custom Shortcuts. `Report.clashing` exposes the list
+  and the CLI prints those lines as warnings rather than successes.
+
 ## [2.0.2] — 2026-09-19
 
 The Win+V keybinding could never be installed: gsettings answered
@@ -120,6 +131,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.3]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v1.0.0...v2.0.0

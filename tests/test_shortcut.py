@@ -298,3 +298,58 @@ def test_fake_gsettings_matches_the_real_schema_rules(fake_gsettings):
     assert right is True
     missing_path = shortcut.set_value(shortcut.CHILD_SCHEMA, "name", "'x'", runner=fake)
     assert missing_path is False
+
+
+def test_unquote_reads_gvariant_strings():
+    assert shortcut.unquote("'<Super>v'") == "<Super>v"
+    assert shortcut.unquote('"<Super>v"') == "<Super>v"
+    assert shortcut.unquote("@as []") == "[]"
+    assert shortcut.unquote(None) == ""
+    assert shortcut.unquote("") == ""
+
+
+def test_custom_conflicts_finds_the_users_own_shortcut(fake_gsettings):
+    """A second shortcut on <Super>v is why Win+V can look dead — never edit it."""
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}', '{shortcut.KEY_PATH}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>v'",
+            f"{shortcut.CHILD_SCHEMA}:{other}|command": "'/usr/bin/keepassxc --toggle'",
+        }
+    )
+    clashes = shortcut.custom_conflicts(runner=fake)
+    assert len(clashes) == 1 and "custom0" in clashes[0] and "keepassxc" in clashes[0]
+    # our own entry and other keys are not reported
+    assert all(shortcut.KEY_PATH not in clash for clash in clashes)
+
+
+def test_custom_conflicts_ignores_a_different_binding(fake_gsettings):
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>m'",
+        }
+    )
+    assert shortcut.custom_conflicts(runner=fake) == []
+
+
+def test_install_warns_about_the_users_shortcut_but_succeeds(fake_gsettings):
+    other = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/"
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{other}']",
+            f"{shortcut.CHILD_SCHEMA}:{other}|binding": "'<Super>v'",
+            f"{shortcut.CHILD_SCHEMA}:{other}|command": "'/usr/bin/keepassxc --toggle'",
+        }
+    )
+    report = install(runner=fake)
+    assert report.ok is True
+    assert report.clashing and "custom0" in report.clashing[0]
+    assert any(
+        message.startswith("warning:") and "already uses <Super>v" in message for message in report.messages
+    )
+    # the user's entry must be untouched, and still registered
+    assert fake.values[f"{shortcut.CHILD_SCHEMA}:{other}|binding"] == "'<Super>v'"
+    assert other in fake.values[f"{shortcut.SCHEMA}|{shortcut.KEY}"]

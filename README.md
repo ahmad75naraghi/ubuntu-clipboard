@@ -2,7 +2,7 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.2-blue)
+![Version](https://img.shields.io/badge/version-2.0.3-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
@@ -167,7 +167,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.2
+Ubuntu Clipboard 2.0.3
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -327,10 +327,14 @@ make run         # python3 -m ubuntu_clipboard --toggle
 **Win+V کار نمی‌کند؟**
 
 ```bash
-ubuntu-clipboard --install-shortcut     # ثبت مجدد میانبر
+ubuntu-clipboard --install-shortcut     # ثبت مجدد میانبر (و هشدار تداخل‌ها)
 ubuntu-clipboard --status               # بررسی خط «shortcut»
 gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 ```
+
+اگر میانبر دیگری هم روی همان کلید باشد، `--install-shortcut` هشدار می‌دهد و مسیر و
+فرمان آن را چاپ می‌کند (آن میانبر را دست نمی‌زنیم چون مال شماست)؛ در
+**Settings → Keyboard → Custom Shortcuts** آن را حذف یا جابه‌جا کنید.
 
 اگر میانبر دیگری روی `<Super>v` باشد، `--install-shortcut` آن را غیرفعال می‌کند و
 هشدار می‌دهد. ممکن است لازم باشد یک بار از حساب خارج و دوباره وارد شوید.
