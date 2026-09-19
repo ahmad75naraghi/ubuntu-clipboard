@@ -1,477 +1,536 @@
-"""
-app.py — ورودی اصلی برنامه — نسخه پایدار بدون چشمک
-- Win+V فقط یک پنجره مستقل می‌سازد (NON_UNIQUE) — بدون DBus تک‌نسخه
-- دیمن جدا: ubuntu-clipboard-daemon یا ubuntu-clipboard --daemon
-- toggle با lock file ساده
+"""The application object: one resident process that owns the clipboard history.
+
+Architecture
+------------
+* ``Gio.ApplicationFlags.HANDLES_COMMAND_LINE`` gives us a *single* instance per
+  session and an IPC channel for free (GApplication's D-Bus name). ``Win+V``
+  runs ``ubuntu-clipboard --toggle``, which either becomes the primary instance
+  (first start) or hands the command to the running one and exits immediately —
+  no lock files, no ``SIGKILL``, no debounce hack, no flicker.
+* Because the process stays alive it keeps ownership of the selection it writes,
+  so a pasted item survives (with the v1 code the window exited 350 ms after
+  writing to the clipboard and the content disappeared with it).
+* Clipboard monitoring is signal based (see :mod:`ubuntu_clipboard.monitor`).
 """
 
 from __future__ import annotations
-import sys
+
+import contextlib
+import logging
 import os
 import signal
-import subprocess
+import threading
+import time
+from collections.abc import Iterable
 from pathlib import Path
-import argparse
 
-from .history import HistoryManager
-from .daemon import ClipboardDaemon
-from .config import get_config
-try:
-    from .log import log, log_window, log_toggle, log_error
-    _HAS_LOG = True
-except Exception:
-    _HAS_LOG = False
-    def log(m,l="INFO"): print(m)
-    def log_window(a,b=""): print(f"WINDOW {a} {b}")
-    def log_toggle(a,b=""): print(f"TOGGLE {a} {b}")
-    def log_error(m): print(f"ERROR {m}")
+from . import APP_ICON, APP_ID, APP_NAME, __version__
+from .config import Config, config_path, get_config
+from .i18n import is_rtl, set_language, t
+from .models import ClipboardItem, ContentType
+from .paste import activate_window, active_window, ensure_clipboard_text, paste_hint, send_paste
+from .storage import HistoryStore
 
-_HAS_GTK = False
-try:
+log = logging.getLogger(__name__)
+
+try:  # pragma: no cover - import guard
     import gi
-    gi.require_version("Gtk","4.0")
-    from gi.repository import Gtk, Gdk, GLib, Gio
+
+    gi.require_version("Gtk", "4.0")
+    gi.require_version("Gdk", "4.0")
+    from gi.repository import Gdk, Gio, GLib, Gtk
+
+    HAS_GTK = True
     try:
-        gi.require_version("Adw","1")
+        gi.require_version("Adw", "1")
         from gi.repository import Adw
-        _HAS_ADW = True
-    except Exception:
-        _HAS_ADW = False
-    _HAS_GTK = True
-except Exception:
-    _HAS_GTK = False
-    _HAS_ADW = False
 
-LOCK_DIR = Path.home() / ".cache" / "ubuntu-clipboard"
-LOCK_FILE = LOCK_DIR / "window.pid"
+        HAS_ADW = True
+    except (ImportError, ValueError):
+        Adw = None  # type: ignore[assignment]
+        HAS_ADW = False
+except (ImportError, ValueError):  # pragma: no cover - no GTK installed
+    Gdk = Gio = GLib = Gtk = None  # type: ignore[assignment]
+    Adw = None  # type: ignore[assignment]
+    HAS_GTK = HAS_ADW = False
 
-def _print_banner():
-    print(r"""
-  _    _ _                 _           _____ _ _       _                         _
- | |  | | |               | |         / ____| (_)     | |                       | |
- | |  | | |__  _   _ _ __ | |_ _   _ | |    | |_ _ __ | |__   ___   __ _ _ __ __| |
- | |  | | '_ \| | | | '_ \| __| | | || |    | | | '_ \| '_ \ / _ \ / _` | '__/ _` |
- | |__| | |_) | |_| | | | | |_| |_| || |____| | | |_) | |_) | (_) | (_| | | | (_| |
-  \____/|_.__/ \__,_|_| |_|\__|\__,_| \_____|_|_| .__/|_.__/ \___/ \__,_|_|  \__,_|
-                                                | |
-  Win+V  —  Windows 11-like Clipboard for Ubuntu |_|  v1.0.0
-    """)
+COMMANDS = ("toggle", "show", "hide", "settings", "quit", "background", "none")
+#: Delay between hiding the window and synthesising Ctrl+V.
+PASTE_DELAY_MS = 180
+#: How long our own configuration writes are ignored by the file monitor.
+CONFIG_GUARD_SECONDS = 1.5
 
-def _handle_toggle_lock() -> bool:
-    """
-    اگر پنجره قبلی باز است، آن را ببند و True برگردان (یعنی toggle off)
-    در غیر این صورت False (باید پنجره جدید باز شود)
-    debounce 400ms برای جلوگیری از چشمک با نگه‌داشتن کلید
-    """ 
-    if _HAS_LOG:
-        log(f"_handle_toggle_lock called argv={sys.argv} pid={os.getpid()}", "TOGGLE")
-    # debounce: اگر همین الان toggle کردیم، نادیده بگیر
-    try:
-        debounce_file = LOCK_DIR / "toggle.debounce"
-        import time
-        if debounce_file.exists():
-            try:
-                last = float(debounce_file.read_text().strip())
-                if time.time() - last < 0.6:
-                    return True  # نادیده بگیر، فرض کن بسته شد
-            except Exception:
-                pass
-        LOCK_DIR.mkdir(parents=True, exist_ok=True)
-        if LOCK_FILE.exists():
-            try:
-                pid = int(LOCK_FILE.read_text().strip())
-                # آیا پروسه زنده است؟
-                os.kill(pid, 0)
-                # زنده است — ببندش
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                    # wait a bit
-                    import time
-                    time.sleep(0.15)
-                    try:
-                        os.kill(pid, 0)
-                        # still alive -> kill -9
-                        os.kill(pid, signal.SIGKILL)
-                    except OSError:
-                        pass
-                except OSError:
-                    pass
-                try:
-                    LOCK_FILE.unlink()
-                except Exception:
-                    pass
-                try:
-                    (LOCK_DIR / "toggle.debounce").write_text(str(time.time()))
-                except Exception:
-                    pass
-                if _HAS_LOG: log_toggle("KILLED", f"killed pid={pid}")
-                return True
-            except (ValueError, OSError):
-                # lock قدیمی یا پروسه مرده — پاک کن
-                try:
-                    LOCK_FILE.unlink()
-                except Exception:
-                    pass
-        return False
-    except Exception:
-        return False
 
-def _write_lock():
-    if _HAS_LOG:
-        log_window("WRITE_LOCK", f"pid={os.getpid()} file={LOCK_FILE}")
-    try:
-        LOCK_DIR.mkdir(parents=True, exist_ok=True)
-        LOCK_FILE.write_text(str(os.getpid()))
-    except Exception:
-        pass
+def parse_command(arguments: Iterable[str]) -> str:
+    """Map application arguments to one of :data:`COMMANDS`."""
+    for argument in arguments:
+        if argument.startswith("--"):
+            name = argument[2:].split("=", 1)[0]
+            if name in COMMANDS:
+                return name
+    return "none"
 
-def _clear_lock(*_):
-    if _HAS_LOG:
-        try:
-            log_window("CLEAR_LOCK", f"pid={os.getpid()} exists={LOCK_FILE.exists()}")
-        except Exception: pass
-    try:
-        if LOCK_FILE.exists() and LOCK_FILE.read_text().strip() == str(os.getpid()):
-            if _HAS_LOG: log_window("UNLINK", str(LOCK_FILE))
-            LOCK_FILE.unlink()
-    except Exception:
-        pass
 
-# ─── GTK App — هر Win+V یک پروسه مستقل (NON_UNIQUE) ───
-if _HAS_GTK:
-    class ClipboardApp(Adw.Application if _HAS_ADW else Gtk.Application):
-        def __init__(self, show_settings=False):
-            # NON_UNIQUE = هر اجرا مستقل، بدون DBus single-instance — هیچ NoReply و چشمکی
+if HAS_GTK:
+    _ApplicationBase = Adw.Application if HAS_ADW else Gtk.Application
+
+    class ClipboardApplication(_ApplicationBase):  # type: ignore[misc,valid-type]
+        """Owns the history store, the clipboard monitor and the popup window."""
+
+        def __init__(
+            self,
+            *,
+            config: Config | None = None,
+            store: HistoryStore | None = None,
+            command: str = "none",
+            debug: bool = False,
+            start_hidden: bool = False,
+        ) -> None:
             super().__init__(
-                application_id="com.ubuntu.clipboard.window",
-                flags=Gio.ApplicationFlags.NON_UNIQUE
+                application_id=APP_ID,
+                flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
             )
-            self.history = HistoryManager()
-            self.show_settings_on_start = show_settings
+            self.config = config or get_config()
+            self.store = store or HistoryStore(config=self.config)
+            self.command = command if command in COMMANDS else "none"
+            self.debug = debug
+            self.start_hidden = start_hidden
             self.window = None
-            # tray is disabled by default now; only if --with-tray
-            self.tray = None
+            self.monitor = None
+            self.settings_window = None
+            self._clipboard = None
+            self._css_provider = None
+            self._config_monitor = None
+            self._previous_window = None
+            self._expected_text: str | None = None
+            #: Bumped on every paste; a mismatch means "the user moved on".
+            self._paste_token = 0
+            self._save_guard_until = 0.0
+            self._reload_pending = False
+            # ``GApplication`` has no ``set_application_name``; the GLib global
+            # is what GTK itself calls during ``gtk_init``.
+            GLib.set_application_name(APP_NAME)
+            # On the X11 backend GTK builds ``WM_CLASS`` from the program name,
+            # which for a ``python3 -m ubuntu_clipboard`` launch is "python3" —
+            # GNOME would then show a generic icon and name for the windows.
+            # The application id is what the desktop entry declares as
+            # ``StartupWMClass``, so using it keeps the windows ours.
+            GLib.set_prgname(APP_ID)
 
-        def do_activate(self):
-            if _HAS_LOG: log_window("DO_ACTIVATE", f"pid={os.getpid()} window_exists={self.window is not None}")
-            # این فقط برای اولین activate همین پروسه صدا زده می‌شود
+        # ── startup ────────────────────────────────────────────────────────
+        def do_startup(self) -> None:  # noqa: N802 - GObject vfunc
+            _ApplicationBase.do_startup(self)
+            log.info("%s %s starting (pid %d)", APP_NAME, __version__, os.getpid())
+            set_language(self.config.language)
+            direction = Gtk.TextDirection.RTL if is_rtl() else Gtk.TextDirection.LTR
+            Gtk.Widget.set_default_direction(direction)
+            self._load_css()
+            self._setup_icons()
+            self._install_actions()
+            self._apply_theme()
+            self._watch_config_file()
+            self._setup_signals()
+            self.store.add_listener(self._on_history_changed)
+            self._start_monitor()
+            # Keep running without any window (background/autostart mode).
+            self.hold()
+
+        def do_activate(self) -> None:  # noqa: N802 - GObject vfunc
+            if self.start_hidden:
+                return
+            self.show_window()
+
+        def do_command_line(self, command_line) -> int:  # noqa: N802 - GObject vfunc
+            arguments = command_line.get_arguments()[1:]
+            command = parse_command(arguments) if arguments else self.command
+            try:
+                return self.dispatch(command or "none")
+            except Exception:  # pragma: no cover - never crash the IPC path
+                log.exception("command %r failed", command)
+                return 1
+
+        def do_shutdown(self) -> None:  # noqa: N802 - GObject vfunc
+            log.info("shutting down")
+            self._cancel_config_watch()
+            if self.monitor is not None:
+                self.monitor.detach()
+            self.store.remove_listener(self._on_history_changed)
+            self.store.close()
+            _ApplicationBase.do_shutdown(self)
+
+        # ── actions ────────────────────────────────────────────────────────
+        def _install_actions(self) -> None:
+            actions = {
+                "toggle": lambda *_: self.toggle_window(),
+                "show": lambda *_: self.show_window(),
+                "hide": lambda *_: self.hide_window(),
+                "settings": lambda *_: self.show_settings(),
+                "clear-history": lambda *_: self.clear_history(),
+                "quit": lambda *_: self.quit(),
+            }
+            for name, callback in actions.items():
+                action = Gio.SimpleAction.new(name, None)
+                action.connect("activate", callback)
+                self.add_action(action)
+            self.set_accels_for_action("app.settings", ["<Primary>comma"])
+            self.set_accels_for_action("app.quit", ["<Primary>q"])
+
+        def dispatch(self, command: str) -> int:
+            log.debug("dispatching command %r", command)
+            if command == "toggle":
+                self.toggle_window()
+            elif command == "show":
+                self.show_window()
+            elif command == "hide":
+                self.hide_window()
+            elif command == "settings":
+                self.show_settings()
+            elif command == "quit":
+                self.quit()
+            elif command == "background":
+                log.info("running in background (clipboard history active)")
+            return 0
+
+        # ── window ─────────────────────────────────────────────────────────
+        def ensure_window(self):
             if self.window is None:
                 from .ui.window import ClipboardWindow
-                self.window = ClipboardWindow(self, self.history)
-                # برای جلوگیری از Unknown در داک
-                try:
-                    self.window.set_icon_name("ubuntu-clipboard")
-                except Exception:
-                    pass
-            if _HAS_LOG: log_window("PRESENT", f"pid={os.getpid()}")
-            self.window.present()
-            # اگر --settings خواسته شده، بعد از present دیالوگ را باز کن
-            if self.show_settings_on_start:
-                GLib.timeout_add(350, lambda: (self._open_settings(), False)[1])
 
-        def do_startup(self):
-            if _HAS_ADW:
-                Adw.Application.do_startup(self)
+                self.window = ClipboardWindow(self)
+            return self.window
+
+        def show_window(self):
+            self._cancel_pending_paste()
+            log.debug("showing the window")
+            window = self.ensure_window()
+            if not window.get_visible():
+                # Remember where focus was so X11 users get it back after pasting.
+                self._previous_window = active_window()
+            window.refresh(force=True)
+            window.present()
+            return window
+
+        def hide_window(self) -> None:
+            if self.window is not None and self.window.get_visible():
+                log.debug("hiding the window")
+                self.window.hide_window()
+
+        def toggle_window(self) -> None:
+            window = self.ensure_window()
+            if window.get_visible():
+                window.hide_window()
             else:
-                Gtk.Application.do_startup(self)
-            # seed demo
-            try:
-                self.history.seed_demo_if_empty()
-            except Exception:
-                pass
-            # tray فقط اگر خواسته شده
-            wants_tray = "--with-tray" in sys.argv or get_config().enable_tray
-            if wants_tray and "--no-tray" not in sys.argv:
-                try:
-                    from .indicator import TrayIndicator
-                    self.tray = TrayIndicator(self)
-                    GLib.timeout_add(500, lambda: (self.tray.setup(), False)[1])
-                except Exception as e:
-                    print(f"tray setup failed: {e}")
+                self.show_window()
 
-        def do_shutdown(self):
-            _clear_lock()
+        def show_settings(self):
+            from .ui.settings import SettingsWindow
+
+            if self.settings_window is not None:
+                self.settings_window.present()
+                return self.settings_window
+            self.settings_window = SettingsWindow(self)
+            self.settings_window.present()
+            return self.settings_window
+
+        def on_settings_closed(self) -> None:
+            self.settings_window = None
+
+        # ── clipboard ──────────────────────────────────────────────────────
+        def _start_monitor(self) -> None:
+            from .monitor import ClipboardMonitor, display_clipboard
+
+            clipboard = display_clipboard()
+            if clipboard is None:
+                log.error("no display available — clipboard history is not active")
+                return
+            self._clipboard = clipboard
+            self.monitor = ClipboardMonitor(self.store)
+            self.monitor.attach(clipboard)
+
+        def set_clipboard(self, item: ClipboardItem) -> bool:
+            """Put ``item`` on the system clipboard (keeps ownership of it)."""
+            if self._clipboard is None or self.monitor is None:
+                return False
+            self.monitor.suppress()
+            # Kept for the verification step in :meth:`_paste_worker`: only a
+            # text payload can be compared cheaply.
+            self._expected_text = None
             try:
-                if hasattr(self, "daemon"):
-                    self.daemon.stop()
+                if item.type is ContentType.IMAGE:
+                    data = self.store.get_image_bytes(item.id)
+                    if not data:
+                        return False
+                    texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
+                    provider = Gdk.ContentProvider.new_for_value(texture)
+                elif item.type is ContentType.FILE:
+                    uris = item.uris() or [
+                        line for line in (self.store.get_text(item.id) or "").splitlines() if line
+                    ]
+                    text = "\n".join(uris)
+                    files = [Gio.File.new_for_uri(uri) for uri in uris]
+                    try:
+                        provider = Gdk.ContentProvider.new_for_value(Gdk.FileList.new_from_list(files))
+                    except Exception:  # pragma: no cover - older GTK/backend
+                        provider = Gdk.ContentProvider.new_for_bytes(
+                            "text/uri-list", GLib.Bytes.new(text.encode("utf-8"))
+                        )
+                else:
+                    text = self.store.get_text(item.id)
+                    if text is None:
+                        return False
+                    self._expected_text = text
+                    try:
+                        provider = Gdk.ContentProvider.new_for_value(text)
+                    except Exception:  # pragma: no cover - defensive
+                        provider = Gdk.ContentProvider.new_for_bytes(
+                            "text/plain;charset=utf-8", GLib.Bytes.new(text.encode("utf-8"))
+                        )
+                self._clipboard.set_content(provider)
             except Exception:
-                pass
-            if _HAS_ADW:
-                Adw.Application.do_shutdown(self)
+                log.exception("cannot write item #%s to the clipboard", item.id)
+                return False
+            return True
+
+        def paste_item(self, item: ClipboardItem) -> None:
+            """Copy ``item`` and deliver ``Ctrl+V`` to the previously focused app."""
+            self._paste_token += 1
+            token = self._paste_token
+            self.hide_window()
+            if not self.set_clipboard(item):
+                self.notify(t("notify.copied"))
+                return
+            self.store.touch(item.id)
+            log.info(
+                "pasting item #%s (%s, %d chars)",
+                item.id,
+                item.type.value,
+                len(self._expected_text or ""),
+            )
+            GLib.timeout_add(PASTE_DELAY_MS, self._deliver_paste, token)
+
+        def _cancel_pending_paste(self) -> None:
+            """Drop a paste that has not been delivered yet.
+
+            The clipboard is prepared and ``Ctrl+V`` is sent a moment later; if
+            the user reopens the window in between they clearly want the window
+            back, not a stray paste landing in whatever window has focus. This
+            is also what stops the window from blinking open and shut while a
+            paste is on its way.
+            """
+            self._paste_token += 1
+
+        def _deliver_paste(self, token: int) -> bool:
+            if token != self._paste_token:
+                log.debug("pending paste cancelled before it was sent")
+                return False
+            threading.Thread(target=self._paste_worker, args=(token,), name="paste", daemon=True).start()
+            return False
+
+        def _paste_worker(self, token: int) -> None:
+            if token != self._paste_token:
+                log.debug("pending paste cancelled before focus was moved")
+                return
+            if self._previous_window:
+                # Giving focus back *before* the clipboard is ready is what made
+                # the popup blink: the focus change hid it, and if the user
+                # reopened it meanwhile the two kept fighting each other.
+                activate_window(self._previous_window)
+                self._previous_window = None
+            self._ensure_clipboard_content()
+            if token != self._paste_token:
+                log.debug("pending paste cancelled while the clipboard was prepared")
+                return
+            succeeded, tool = send_paste()
+            if not succeeded:
+                # Be specific: the item *is* on the clipboard, but the user has
+                # to press Ctrl+V until automatic pasting is set up.
+                self.notify(t(paste_hint()))
+                log.info("automatic paste unavailable — see --setup-paste")
             else:
-                Gtk.Application.do_shutdown(self)
+                log.debug("pasted with %s", tool)
 
-        def _open_settings(self):
+        def _ensure_clipboard_content(self) -> None:
+            """Do not press ``Ctrl+V`` until the clipboard really holds our item.
+
+            GTK's clipboard write is asynchronous and a receiving application can
+            read the previous selection if the new one has not been published
+            yet — which is how "it pastes the last item instead of the one I
+            chose" happens. The payload is read back first, and written again
+            with an external helper (``wl-copy``/``xclip``) when it is missing.
+            """
+            expected = self._expected_text
+            if expected is None:
+                return
+            verified, tool = ensure_clipboard_text(expected)
+            if verified and tool is None:
+                log.debug("clipboard verified after the GTK write (%d chars)", len(expected))
+            elif verified:
+                # The external write is one more change the monitor must ignore.
+                self.monitor.suppress()
+                log.info("clipboard re-written with %s and verified (%d chars)", tool, len(expected))
+            else:
+                log.warning(
+                    "the clipboard does not hold the selected item (%d chars) — pasting anyway",
+                    len(expected),
+                )
+
+        def clear_history(self) -> int:
+            removed = self.store.clear()
+            self.notify(t("notify.history_cleared"))
+            return removed
+
+        def notify(self, message: str) -> None:
+            """Best effort desktop notification (ignored when unavailable)."""
             try:
-                from .ui.settings import show_settings
-                show_settings(self.window, self.history)
-            except Exception as e:
-                print(f"settings open failed: {e}")
+                notification = Gio.Notification.new(APP_NAME)
+                notification.set_body(message)
+                notification.set_icon(Gio.ThemedIcon.new(APP_ICON))
+                self.send_notification(None, notification)
+            except Exception:  # pragma: no cover - notification daemon missing
+                log.debug("cannot send notification", exc_info=True)
 
-    def main_gtk(show_settings=False):
-        _print_banner()
-        cfg = get_config()
-        print(f"  Theme: {cfg.theme}  Max: {cfg.max_items}  DB: {HistoryManager().db_path}")
-        print(f"  Shortcut: Super+V (Win+V)\n")
-        if _HAS_ADW:
-            Adw.init()
-        # toggle logic: اگر پنجره قبلی باز است، ببند و خارج شو
-        # فقط برای حالت عادی (نه --settings)
-        if not show_settings and "--daemon" not in sys.argv and "--hidden" not in sys.argv:
-            if _HAS_LOG: log_toggle("CHECK", f"argv={sys.argv}")
-            if _handle_toggle_lock():
-                if _HAS_LOG: log_toggle("KILLED_PREV", "toggle off, exiting")
-                print("  (پنجره قبلی بسته شد — toggle)")
-                return 0
-            if _HAS_LOG: log_toggle("NO_PREV", "no previous window, will create new")
-        _write_lock()
-        if _HAS_LOG: log_window("CREATING", f"pid={os.getpid()} show_settings={show_settings}")
-        # cleanup on exit
-        import atexit
-        atexit.register(_clear_lock)
-        signal.signal(signal.SIGTERM, lambda *_: (_clear_lock(), sys.exit(0)))
-        app = ClipboardApp(show_settings=show_settings)
-        # also handle SIGINT
-        def sig_handler(*_):
-            _clear_lock()
-            app.quit()
-        signal.signal(signal.SIGINT, sig_handler)
-        try:
-            # Use clean argv to avoid GApplication Unknown option errors
-            return app.run([sys.argv[0]])
-        finally:
-            _clear_lock()
+        # ── theming & css ──────────────────────────────────────────────────
+        def _load_css(self) -> None:
+            from importlib.resources import files
 
-# ─── TK fallback ───
-def main_tk(show_settings=False):
-    _print_banner()
-    try:
-        import tkinter
-        has_tk = True
-    except ImportError:
-        has_tk = False
+            css_path = files("ubuntu_clipboard.ui").joinpath("styles.css")
+            stylesheet = css_path.read_text(encoding="utf-8")
+            provider = Gtk.CssProvider()
+            try:
+                if hasattr(provider, "load_from_string"):  # GTK >= 4.12
+                    provider.load_from_string(stylesheet)
+                else:  # pragma: no cover - GTK 4.0 .. 4.10
+                    provider.load_from_data(stylesheet.encode("utf-8"))
+            except GLib.Error as exc:
+                log.error("stylesheet is invalid: %s", exc)
+                return
+            display = Gdk.Display.get_default()
+            if display is None:
+                return
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+            self._css_provider = provider
 
-    from .ui.window import ClipboardWindow
-    history = HistoryManager()
-    try:
-        history.seed_demo_if_empty()
-    except Exception:
-        pass
-    daemon = ClipboardDaemon(history=history)
-    # برای حالت پنجره، دیمن را اگر قبلاً daemon جدا اجرا نشده، اجرا کن
-    # اما اگر daemon جدا در حال اجراست، نیازی نیست
-    # بررسی: آیا daemon جدا در حال اجراست؟
-    import subprocess
-    try:
-        r = subprocess.run(["pgrep", "-af", "ubuntu-clipboard"], capture_output=True, text=True, timeout=1)
-        daemon_already = bool(r.stdout.strip())
-    except Exception:
-        daemon_already = False
-    if not daemon_already:
-        daemon.start(use_gtk=False)
+        def _setup_icons(self) -> None:
+            """Let GTK resolve ``ubuntu-clipboard`` from the bundled hicolor tree."""
+            from .install import assets_dir
 
-    if show_settings:
-        # settings standalone
-        try:
-            from .ui.settings import show_settings
-            # need a root for dialog
-            import tkinter as tk
-            root = tk.Tk()
-            root.withdraw()
-            show_settings(None, history)
-            root.mainloop()
-        except Exception as e:
-            print(f"settings failed: {e}")
-        return
+            display = Gdk.Display.get_default()
+            if display is None:  # pragma: no cover - headless
+                return
+            with contextlib.suppress(AttributeError, TypeError, GLib.Error):
+                Gtk.IconTheme.get_for_display(display).add_search_path(str(assets_dir()))
 
-    if not has_tk and not _HAS_GTK:
-        print("  ✗ GUI toolkit موجود نیست")
-        print("  نصب: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-tk -y")
-        return
+        def _apply_theme(self) -> None:
+            theme = self.config.theme
+            if HAS_ADW:
+                schemes = {
+                    "dark": Adw.ColorScheme.FORCE_DARK,
+                    "light": Adw.ColorScheme.FORCE_LIGHT,
+                }
+                Adw.StyleManager.get_default().set_color_scheme(schemes.get(theme, Adw.ColorScheme.DEFAULT))
+            else:
+                settings = Gtk.Settings.get_default()
+                if settings is not None and theme in {"dark", "light"}:
+                    settings.set_property("gtk-application-prefer-dark-theme", theme == "dark")
+            if self.window is not None:
+                self.window.apply_theme(self.dark_mode)
 
-    # toggle lock for Tk as well
-    if not show_settings:
-        if _handle_toggle_lock():
-            print("  (پنجره قبلی بسته شد)")
-            return
-    _write_lock()
-    import atexit
-    atexit.register(_clear_lock)
+        @property
+        def dark_mode(self) -> bool:
+            """Whether the effective theme is dark."""
+            if HAS_ADW:
+                return bool(Adw.StyleManager.get_default().get_dark())
+            settings = Gtk.Settings.get_default()
+            if settings is None:  # pragma: no cover - headless
+                return True
+            if self.config.theme == "dark":
+                return True
+            if self.config.theme == "light":
+                return False
+            theme_name = settings.get_property("gtk-theme-name") or ""
+            return "dark" in theme_name.lower()
 
-    if not _HAS_GTK:
-        print("  حالت Tkinter fallback")
-    print(f"  DB: {history.db_path}\n")
+        # ── configuration ──────────────────────────────────────────────────
+        def save_config(self) -> None:
+            """Persist the current configuration, ignoring the resulting event."""
+            self._save_guard_until = time.monotonic() + CONFIG_GUARD_SECONDS
+            try:
+                self.config.save()
+            except OSError:
+                log.exception("cannot save the configuration")
+            self.apply_config(reload_store=False)
 
-    # Tk window is already handled via ClipboardWindow fallback
-    w = ClipboardWindow(history=history)
-    try:
-        w._ensure()
-        if getattr(w, "_root", None) is not None:
-            w._refresh()
-            # handle close to clear lock
-            orig_hide = w.hide
-            def hide_and_clear():
-                _clear_lock()
-                orig_hide()
+        def apply_config(self, *, reload_store: bool = True) -> None:
+            set_language(self.config.language)
+            Gtk.Widget.set_default_direction(Gtk.TextDirection.RTL if is_rtl() else Gtk.TextDirection.LTR)
+            self._apply_theme()
+            if reload_store:
+                self.store.set_config(self.config)
+            if self.window is not None:
+                self.window.apply_config()
+
+        def reload_config(self) -> None:
+            log.info("configuration changed on disk — reloading")
+            self.config = get_config(reload=True)
+            self.store.set_config(self.config)
+            self.apply_config(reload_store=False)
+
+        def _watch_config_file(self) -> None:
+            """Watch the *directory*: the config is replaced atomically."""
+            try:
+                gfile = Gio.File.new_for_path(str(config_path().parent))
+                self._config_monitor = gfile.monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
+                self._config_monitor.connect("changed", self._on_config_file_changed)
+            except (GLib.Error, TypeError):  # pragma: no cover - unsupported backend
+                log.debug("cannot watch the configuration directory", exc_info=True)
+
+        def _cancel_config_watch(self) -> None:
+            if self._config_monitor is not None:
+                self._config_monitor.cancel()
+                self._config_monitor = None
+
+        def _on_config_file_changed(self, _monitor, gfile, _other, _event, *_args) -> None:
+            path = gfile.get_path() if gfile is not None else None
+            if path is None or Path(path) != config_path():
+                return
+            if time.monotonic() < self._save_guard_until or self._reload_pending:
+                return
+            self._reload_pending = True
+
+            def reload_later() -> bool:
+                self._reload_pending = False
+                self.reload_config()
+                return False
+
+            GLib.timeout_add(300, reload_later)
+
+        def _on_history_changed(self) -> None:
+            # Listeners run on whichever thread mutated the store.
+            def refresh_later() -> bool:
+                if self.window is not None:
+                    self.window.refresh()
+                return False
+
+            GLib.idle_add(refresh_later)
+
+        # ── signals ────────────────────────────────────────────────────────
+        def _setup_signals(self) -> None:
+            for signum in (signal.SIGINT, signal.SIGTERM):
                 try:
-                    w._root.quit()
-                except Exception:
-                    pass
-            w.hide = hide_and_clear
-            w._root.protocol("WM_DELETE_WINDOW", hide_and_clear)
-            w._root.mainloop()
-        else:
-            print("  GUI در دسترس نیست")
-            import time
-            while True:
-                time.sleep(1)
-    except Exception as e:
-        print(f"خطا: {e}")
-    finally:
-        _clear_lock()
-        daemon.stop()
+                    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signum, self._on_signal, signum)
+                except Exception:  # pragma: no cover - not a unix main context
+                    log.debug("cannot install handler for signal %s", signum)
 
-def main():
-    try:
-        from .log import log as _log0
-        _log0(f"MAIN START argv={sys.argv} pid={os.getpid()} cwd={os.getcwd()}", "MAIN")
-    except Exception:
-        pass
-    parser = argparse.ArgumentParser(description="Ubuntu Clipboard — Win+V", add_help=False)
-    parser.add_argument("--hidden", action="store_true", help="شروع مخفی (فقط دیمن)")
-    parser.add_argument("--daemon", action="store_true", help="فقط دیمن بدون UI")
-    parser.add_argument("--toggle", action="store_true", help="نمایش/بستن پنجره (Win+V)")
-    parser.add_argument("--show", action="store_true", help="نمایش پنجره")
-    parser.add_argument("--settings", action="store_true", help="باز کردن تنظیمات")
-    parser.add_argument("--status", action="store_true", help="نمایش وضعیت")
-    parser.add_argument("--debug", action="store_true", help="حالت دیباگ")
-    parser.add_argument("--no-tray", action="store_true", help="بدون آیکون تسک‌بار")
-    parser.add_argument("--with-tray", action="store_true", help="با آیکون تسک‌بار")
-    parser.add_argument("--log", action="store_true", help="نمایش لاگ کامل")
-    parser.add_argument("--clear-log", action="store_true", help="پاک کردن لاگ")
-    parser.add_argument("-h", "--help", action="store_true")
-    args, _ = parser.parse_known_args()
+        def _on_signal(self, signum: int) -> bool:
+            log.info("received signal %d — quitting", signum)
+            self.quit()
+            return False
 
-    if args.clear_log:
-        try:
-            from .log import clear_logs
-            clear_logs()
-            print("✓ لاگ پاک شد")
-        except Exception as e:
-            print(f"clear log failed: {e}")
-        return
-    if args.log:
-        try:
-            from .log import tail_logs, CACHE_LOG, TMP_LOG
-            print(f"=== CACHE LOG: {CACHE_LOG} ===")
-            print(tail_logs(200))
-            print(f"\n=== TMP LOG: {TMP_LOG} ===")
-            try:
-                print(open(TMP_LOG, encoding="utf-8", errors="ignore").read()[-4000:])
-            except Exception as e:
-                print(f"tmp log read failed: {e}")
-        except Exception as e:
-            print(f"log failed: {e}")
-        return
-    if args.status:
-        _print_status()
-        return
+else:  # pragma: no cover - no GTK available
+    ClipboardApplication = None  # type: ignore[assignment,misc]
 
-    if args.settings:
-        if _HAS_GTK:
-            sys.exit(main_gtk(show_settings=True))
-        else:
-            main_tk(show_settings=True)
-        return
 
-    if args.help:
-        print("Ubuntu Clipboard — Win+V  v1.0.0\n")
-        print("  ubuntu-clipboard              نمایش پنجره (Win+V)")
-        print("  ubuntu-clipboard --toggle     نمایش/بستن (میانبر)")
-        print("  ubuntu-clipboard --hidden     اجرای دیمن در پس‌زمینه (Autostart)")
-        print("  ubuntu-clipboard --daemon     فقط دیمن")
-        print("  ubuntu-clipboard --settings   تنظیمات")
-        print("  ubuntu-clipboard --status     وضعیت")
-        print("  ubuntu-clipboard --with-tray  با آیکون Top Bar (اختیاری)")
-        print("")
-        return
-
-    # daemon modes — بدون پنجره
-    if args.daemon or args.hidden:
-        if _HAS_LOG: log("DAEMON mode --hidden/--daemon", "DAEMON")
-        # --hidden اکنون یعنی فقط دیمن (بدون پنجره) برای جلوگیری از چشمک
-        from .daemon import main as daemon_main
-        # اگر --with-tray خواسته شده، دیمن + tray standalone
-        if args.with_tray:
-            # run daemon in thread and tray in main?
-            # ساده: daemon را اجرا کن و tray را اسپاون کن
-            try:
-                import subprocess
-                subprocess.Popen([sys.executable, "-m", "ubuntu_clipboard.tray"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-            except Exception:
-                pass
-        # daemon blocking
-        sys.argv = [sys.argv[0]]
-        daemon_main()
-        return
-
-    # window modes — هر اجرا یک پروسه مستقل کوتاه‌مدت
-    if _HAS_LOG: log(f"WINDOW MODE argv={sys.argv} has_gtk={_HAS_GTK}", "WINDOW")
-    if _HAS_GTK:
-        # برای --toggle هم همان show است — toggle با lock file هندل می‌شود
-        sys.exit(main_gtk(show_settings=False))
-    else:
-        main_tk(show_settings=False)
-
-def _print_status():
-    _print_banner()
-    from pathlib import Path
-    cfg = get_config()
-    hm = HistoryManager()
-    print("── وضعیت کلیپ‌بورد ──")
-    print(f"  DB: {hm.db_path}  (exists={hm.db_path.exists()})")
-    try:
-        print(f"  تعداد آیتم‌ها: {hm.count()}  (سنجاق: {len(hm.list_pinned())})")
-        items = hm.list(limit=3)
-        for i, it in enumerate(items, 1):
-            print(f"    {i}. [{it.type}] {it.preview[:60]}  — {it.time_ago} pinned={it.pinned}")
-        if not items:
-            print("    (خالی)")
-    except Exception as e:
-        print(f"  خطا: {e}")
-    print(f"\n  Config: theme={cfg.theme} max={cfg.max_items} tray={cfg.enable_tray}")
-    print(f"  Session: {os.environ.get('XDG_SESSION_TYPE','?')}  WAYLAND={os.environ.get('WAYLAND_DISPLAY','-')}  DISPLAY={os.environ.get('DISPLAY','-')}")
-    import shutil
-    for cmd in ["wl-paste","wl-copy","xclip","xsel","xdotool","wtype"]:
-        print(f"    {cmd:12} {'✓' if shutil.which(cmd) else '✗'}")
-    autostart = Path.home()/".config/autostart/ubuntu-clipboard.desktop"
-    autostart_daemon = Path.home()/".config/autostart/ubuntu-clipboard-daemon.desktop"
-    print(f"\n  Autostart window: {autostart} exists={autostart.exists()}")
-    print(f"  Autostart daemon: {autostart_daemon} exists={autostart_daemon.exists()}")
-    try:
-        import subprocess
-        out = subprocess.run(["gsettings","get","org.gnome.settings-daemon.plugins.media-keys","custom-keybindings"], capture_output=True, text=True, timeout=2)
-        print(f"  Shortcut: {out.stdout.strip()[:200]}")
-        out2 = subprocess.run(["gsettings","get","org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/","command"], capture_output=True, text=True, timeout=2)
-        if out2.stdout.strip():
-            print(f"    command: {out2.stdout.strip()}")
-    except Exception as e:
-        print(f"  gsettings: {e}")
-    try:
-        import subprocess
-        ps = subprocess.run(["pgrep","-af","ubuntu-clipboard"], capture_output=True, text=True, timeout=2)
-        print(f"\n  Processes:\n    {ps.stdout.strip() or '(هیچ)'}")
-    except Exception:
-        pass
-    lock = LOCK_FILE
-    if lock.exists():
-        print(f"  Window lock: {lock.read_text().strip()} (exists)")
-    else:
-        print(f"  Window lock: (none)")
-
-def _open_settings_standalone():
-    # handled in main() --settings
-    pass
-
-if __name__ == "__main__":
-    main()
+def gtk_available() -> bool:
+    return HAS_GTK

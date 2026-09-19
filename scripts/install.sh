@@ -1,194 +1,169 @@
 #!/usr/bin/env bash
-# install.sh — نصب حرفه‌ای کلیپ‌بورد اوبونتو
-set -e
+#
+# install.sh — install Ubuntu Clipboard for the current user.
+#
+# The script only installs distribution packages, then hands over to
+# `ubuntu-clipboard --install`, which writes the desktop entry, the icon, the
+# autostart file and the Win+V keybinding. Re-running it is safe.
+#
+set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VENV_DIR="$HOME/.local/share/ubuntu-clipboard/venv"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VENV_DIR="${UBUNTU_CLIPBOARD_VENV:-$HOME/.local/share/ubuntu-clipboard/venv}"
 BIN_DIR="$HOME/.local/bin"
-DESKTOP_DIR="$HOME/.local/share/applications"
-AUTOSTART_DIR="$HOME/.config/autostart"
 
-echo "╔════════════════════════════════════════════════╗"
-echo "║   Ubuntu Clipboard — نصب حرفه‌ای   Win+V     ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
+APT_PACKAGES=(python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1)
+OPTIONAL_PACKAGES=(wl-clipboard xclip xdotool wtype ydotool)
 
-# 1. وابستگی‌های سیستمی
-echo "📦 بررسی وابستگی‌ها..."
-MISSING=()
-# Python GI
-if ! python3 -c "import gi" 2>/dev/null; then
-  MISSING+=("python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1")
-fi
-for cmd in wl-copy xclip; do
-  if ! command -v "$cmd" &>/dev/null; then
-    if [[ "$cmd" == "wl-copy" ]]; then MISSING+=("wl-clipboard")
-    else MISSING+=("xclip")
-    fi
-  fi
+ASSUME_YES=0
+SKIP_APT=0
+START_NOW=1
+
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes) ASSUME_YES=1 ;;
+    --no-apt) SKIP_APT=1 ;;
+    --no-start) START_NOW=0 ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: ./scripts/install.sh [options]
+
+  -y, --yes       answer "yes" to every question
+      --no-apt    never call apt-get (do not install distribution packages)
+      --no-start  do not start the background service at the end
+  -h, --help      show this message
+EOF
+      exit 0 ;;
+    *) echo "unknown option: $arg" >&2; exit 2 ;;
+  esac
 done
-# AppIndicator برای آیکون تسک‌بار
-if ! dpkg -l gir1.2-ayatanaappindicator3-0.1 &>/dev/null && ! dpkg -l gir1.2-appindicator3-0.1 &>/dev/null; then
-  MISSING+=("gir1.2-ayatanaappindicator3-0.1")
-fi
-if ! dpkg -l gnome-shell-extension-appindicator &>/dev/null; then
-  MISSING+=("gnome-shell-extension-appindicator")
+
+say()  { printf '%s\n' "$*"; }
+warn() { printf '!  %s\n' "$*" >&2; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+ask() {
+  local prompt="$1"
+  if [[ $ASSUME_YES -eq 1 || ! -t 0 ]]; then return 0; fi
+  read -r -p "$prompt [Y/n] " reply
+  [[ -z "$reply" || "$reply" =~ ^[Yy] ]]
+}
+
+say "Ubuntu Clipboard — user installation"
+say "repository: $REPO_DIR"
+
+# ── 1. distribution packages ────────────────────────────────────────────────
+gtk_ok() { python3 - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk  # noqa: F401
+PY
+}
+
+missing=()
+gtk_ok || missing+=("${APT_PACKAGES[@]}")
+for pkg in "${OPTIONAL_PACKAGES[@]}"; do
+  case "$pkg" in
+    wl-clipboard) have wl-copy || missing+=("$pkg") ;;
+    xclip)        have xclip    || missing+=("$pkg") ;;
+    xdotool)      have xdotool  || missing+=("$pkg") ;;
+    # wtype and ydotool are not packaged everywhere; they are suggestions only.
+  esac
+done
+
+if [[ ${#missing[@]} -gt 0 && $SKIP_APT -eq 0 ]] && have apt-get; then
+  # De-duplicate while keeping the order.
+  unique=()
+  for pkg in "${missing[@]}"; do
+    [[ " ${unique[*]} " == *" $pkg "* ]] || unique+=("$pkg")
+  done
+  say "missing packages: ${unique[*]}"
+  if ask "Install them with apt-get (needs sudo)?"; then
+    sudo apt-get update -qq || warn "apt-get update failed, continuing"
+    sudo apt-get install -y "${unique[@]}" || warn "some packages could not be installed"
+  else
+    warn "skipping apt — the application may not start"
+  fi
+elif [[ ${#missing[@]} -gt 0 ]]; then
+  warn "missing packages: ${missing[*]}"
 fi
 
-if [ ${#MISSING[@]} -ne 0 ]; then
-  echo "  نصب وابستگی‌ها: ${MISSING[*]}"
-  echo "  sudo apt update && sudo apt install -y ${MISSING[*]} wl-clipboard xclip xdotool wtype"
-  if command -v apt &>/dev/null; then
-    echo ""
-    # اگر در محیط غیرتعاملی هستیم (CI) خودکار Y
-    if [[ ! -t 0 ]]; then ans="Y"; else read -p "  آیا با sudo نصب کنم؟ [Y/n] " ans; fi
-    if [[ "$ans" != "n" && "$ans" != "N" ]]; then
-      sudo apt update
-      sudo apt install -y python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 wl-clipboard xclip xdotool gir1.2-ayatanaappindicator3-0.1 gnome-shell-extension-appindicator || true
-      sudo apt install -y gir1.2-appindicator3-0.1  || true
-      sudo apt install -y wtype  || echo "  ⚠️ wtype نصب نشد (اختیاری برای Wayland)"
-      # فعال‌سازی افزونه AppIndicator برای دیدن آیکون در Top Bar
-      gnome-extensions enable ubuntu-appindicators@ubuntu.com 2>/dev/null || gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com 2>/dev/null || gnome-extensions enable appindicator@rgcjonas.gmail.com 2>/dev/null || true
+if ! gtk_ok; then
+  warn "GTK 4 bindings are still missing; install python3-gi and gir1.2-gtk-4.0"
+fi
+
+# ── 2. python package inside an isolated virtualenv ────────────────────────
+say "installing the python package into $VENV_DIR"
+mkdir -p "$VENV_DIR" "$BIN_DIR"
+
+if ! python3 -m venv --help >/dev/null 2>&1; then
+  warn "the 'venv' module is unavailable — install it with:"
+  warn "  sudo apt install python3-venv"
+  exit 1
+fi
+
+# PEP 668 (Ubuntu 23.04+) forbids `pip install` outside a virtualenv, hence the
+# --system-site-packages venv: it keeps PyGObject visible to the package.
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+  rm -rf "$VENV_DIR"
+  python3 -m venv --system-site-packages "$VENV_DIR"
+elif ! "$VENV_DIR/bin/python" -c "import gi" >/dev/null 2>&1; then
+  say "recreating the virtualenv without isolation from system packages"
+  rm -rf "$VENV_DIR"
+  python3 -m venv --system-site-packages "$VENV_DIR"
+fi
+
+"$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+"$VENV_DIR/bin/python" -m pip install --quiet --upgrade "$REPO_DIR"
+
+for name in ubuntu-clipboard ubuntu-clipboard-daemon; do
+  cat > "$BIN_DIR/$name" <<EOF
+#!/usr/bin/env bash
+exec "$VENV_DIR/bin/$name" "\$@"
+EOF
+  chmod 0755 "$BIN_DIR/$name"
+done
+say "installed: $VENV_DIR/bin/ubuntu-clipboard"
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) warn "$BIN_DIR is not in PATH — add it to ~/.profile:"
+     warn "  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+esac
+
+# ── 3. desktop integration ─────────────────────────────────────────────────
+say "registering the desktop entry, icon, autostart and the Win+V shortcut"
+"$VENV_DIR/bin/ubuntu-clipboard" --install || warn "desktop integration reported problems"
+
+# ── 4. start the service ───────────────────────────────────────────────────
+if [[ $START_NOW -eq 1 ]]; then
+  "$VENV_DIR/bin/ubuntu-clipboard" --quit >/dev/null 2>&1 || true
+  STARTUP_OUTPUT="$(mktemp)"
+  nohup "$VENV_DIR/bin/ubuntu-clipboard" --background >"$STARTUP_OUTPUT" 2>&1 &
+  sleep 2
+  if "$VENV_DIR/bin/ubuntu-clipboard" --status | grep -q "instance *running"; then
+    say "service started"
+  else
+    warn "the service did not start"
+    if [[ -s "$STARTUP_OUTPUT" ]]; then
+      say "--- output of 'ubuntu-clipboard --background' ---"
+      tail -n 25 "$STARTUP_OUTPUT" | sed 's/^/  /'
     fi
+    warn "more details: ubuntu-clipboard --logs 100 — or: ubuntu-clipboard --collect-logs"
   fi
-else
-  echo "  ✓ همه وابستگی‌ها موجود است"
+  rm -f "$STARTUP_OUTPUT"
 fi
 
-# 2. نصب پایتون
-echo ""
-echo "🐍 نصب پکیج پایتون..."
-mkdir -p "$BIN_DIR" "$DESKTOP_DIR" "$AUTOSTART_DIR"
-# چک tk
-if ! python3 -c "import tkinter" 2>/dev/null; then
-  echo "  ⚠️ python3-tk نصب نیست — برای fallback لازم است"
-  MISSING_TK=1
-else
-  MISSING_TK=0
-fi
-if [[ $MISSING_TK -eq 1 ]]; then
-  echo "  تلاش برای نصب python3-tk ..."
-  sudo apt install -y python3-tk 2>/dev/null || echo "  ⚠️ نصب tk ناموفق — ادامه می‌دهیم (GTK اصلی استفاده می‌شود)"
-fi
-# سعی با pipx یا venv یا --user
-if command -v pipx &>/dev/null; then
-  pipx install "$REPO_DIR" --force  || pip install --user "$REPO_DIR"
-else
-  # venv اختصاصی — حتما با --system-site-packages تا python3-gi دیده شود!
-  if [ -d "$VENV_DIR" ] && ! "$VENV_DIR/bin/python" -c "import gi" 2>/dev/null; then
-    echo "  ♻️  venv قدیمی بدون دسترسی به gi — بازسازی با --system-site-packages ..."
-    rm -rf "$VENV_DIR"
-  fi
-  if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv --system-site-packages "$VENV_DIR" || python3 -m venv "$VENV_DIR"
-  fi
-  "$VENV_DIR/bin/pip" install --upgrade pip
-  "$VENV_DIR/bin/pip" install "$REPO_DIR"
-  # wrapper
-  cat > "$BIN_DIR/ubuntu-clipboard" <<EOF
-#!/usr/bin/env bash
-exec "$VENV_DIR/bin/ubuntu-clipboard" "\$@"
+cat <<'EOF'
+
+Done.
+
+  Open the window     Win+V  (or: ubuntu-clipboard --toggle)
+  Preferences         ubuntu-clipboard --settings
+  Status              ubuntu-clipboard --status
+  Logs                ubuntu-clipboard --logs
+  Uninstall           ./scripts/uninstall.sh
+
+If Win+V does nothing, log out and back in once so GNOME picks up the new
+keybinding, or check that no other shortcut uses <Super>v.
 EOF
-  cat > "$BIN_DIR/ubuntu-clipboard-daemon" <<EOF
-#!/usr/bin/env bash
-exec "$VENV_DIR/bin/ubuntu-clipboard-daemon" "\$@"
-EOF
-  chmod +x "$BIN_DIR/ubuntu-clipboard" "$BIN_DIR/ubuntu-clipboard-daemon"
-  echo "  ✓ نصب در venv: $VENV_DIR (system-site-packages)"
-  # تست gi داخل venv
-  if ! "$VENV_DIR/bin/python" -c "import gi; gi.require_version('Gtk','4.0')" 2>/dev/null; then
-    echo "  ⚠️  هشدار: gi داخل venv دیده نمی‌شود!"
-    echo "     سعی کنید: sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1"
-  else
-    echo "  ✓ GTK داخل venv تایید شد"
-  fi
-fi
-
-# اطمینان از PATH
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  echo "  ⚠️  $BIN_DIR در PATH نیست — به .bashrc اضافه می‌شود"
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-
-# 3. فایل‌های دسکتاپ + آیکون
-echo ""
-echo "🖥️  ثبت Autostart و میانبر..."
-mkdir -p "$DESKTOP_DIR" "$AUTOSTART_DIR" "$HOME/.local/share/icons"
-cp "$REPO_DIR/data/icons/ubuntu-clipboard.png" "$HOME/.local/share/icons/" 2>/dev/null || cp "$REPO_DIR/ubuntu_clipboard/assets/icon.png" "$HOME/.local/share/icons/ubuntu-clipboard.png" 2>/dev/null || true
-gtk-update-icon-cache "$HOME/.local/share/icons" 2>/dev/null || true
-mkdir -p "$DESKTOP_DIR" "$AUTOSTART_DIR"
-cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$DESKTOP_DIR/"
-cp "$REPO_DIR/data/ubuntu-clipboard-daemon.desktop" "$AUTOSTART_DIR/ubuntu-clipboard-daemon.desktop"
-# also keep a copy of main for manual hidden autostart (disabled by default)
-cp "$REPO_DIR/data/ubuntu-clipboard.desktop" "$AUTOSTART_DIR/ubuntu-clipboard.desktop" 2>/dev/null || true
-# disable the window autostart by default (we want only daemon) — remove or hide
-rm -f "$AUTOSTART_DIR/ubuntu-clipboard.desktop" 2>/dev/null || true
-# settings launcher هم
-cp "$REPO_DIR/data/ubuntu-clipboard-settings.desktop" "$DESKTOP_DIR/" 2>/dev/null || true
-# به‌روزرسانی Exec اگر venv است
-if [ -d "$VENV_DIR" ]; then
-  sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$DESKTOP_DIR/ubuntu-clipboard.desktop"
-  sed -i "s|Exec=ubuntu-clipboard --daemon|Exec=$BIN_DIR/ubuntu-clipboard --daemon|" "$AUTOSTART_DIR/ubuntu-clipboard-daemon.desktop"
-  sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$AUTOSTART_DIR/ubuntu-clipboard-daemon.desktop" 2>/dev/null || true
-  sed -i "s|Exec=ubuntu-clipboard|Exec=$BIN_DIR/ubuntu-clipboard|" "$DESKTOP_DIR/ubuntu-clipboard-settings.desktop" 2>/dev/null || true
-fi
-update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
-
-# 4. میانبر Win+V
-echo ""
-if command -v gsettings &>/dev/null; then
-  bash "$REPO_DIR/scripts/setup-shortcut.sh" || echo "  ⚠️ ثبت میانبر ناموفق — دستی انجام دهید"
-else
-  echo "  ⚠️ gsettings یافت نشد — میانبر را دستی بسازید"
-fi
-
-# 5. تست و اجرا
-# kill old
-pkill -f ubuntu-clipboard 2>/dev/null || true
-pkill -f ubuntu_clipboard.tray 2>/dev/null || true
-rm -f ~/.cache/ubuntu-clipboard/window.pid 2>/dev/null || true
-sleep 0.5
-
-echo ""
-echo "✅ نصب کامل شد!"
-echo ""
-echo "  اجرا:        ubuntu-clipboard              (پنجره Win+V)"
-echo "  دیمن:        ubuntu-clipboard --daemon     (پس‌زمینه، بدون پنجره)"
-echo "  میانبر:      Win+V (Super+V)"
-echo "  تنظیمات:     ubuntu-clipboard --settings   یا آیکون Top Bar → ⚙️ تنظیمات"
-echo "  وضعیت:       ubuntu-clipboard --status"
-echo "  لاگ:         cat /tmp/ubuntu-clipboard.log"
-echo "  DB:          ~/.config/ubuntu-clipboard/history.db"
-echo ""
-echo "  نکته: آیکون تسک‌بار به صورت پیش‌فرض خاموش است تا چشمک نزند"
-echo "  برای فعال‌سازی (اختیاری): ubuntu-clipboard --hidden --with-tray"
-echo "  نیاز: sudo apt install gnome-shell-extension-appindicator"
-echo "        gnome-extensions enable ubuntu-appindicators@ubuntu.com"
-echo ""
-# اجرا — همیشه با لاگ
-echo "🚀 اجرای برنامه..."
-if [[ ! -t 0 ]]; then run="Y"; else read -p "  همین حالا اجرا کنم؟ [Y/n] " run; fi
-if [[ "$run" != "n" && "$run" != "N" ]]; then
-  # اجرای دیمن (بدون پنجره) — پایدار و بدون چشمک
-  nohup "$BIN_DIR/ubuntu-clipboard" --daemon >/tmp/ubuntu-clipboard.log 2>&1 &
-  sleep 1.2
-  if pgrep -f ubuntu-clipboard >/dev/null; then
-    echo "  ✓ اجرا شد — PID: $(pgrep -f ubuntu-clipboard | head -1)"
-    echo "  ✓ لاگ: /tmp/ubuntu-clipboard.log"
-    echo ""
-    echo "  👉 حالا تست کنید:"
-    echo "     1) یک متن کپی کنید (Ctrl+C)"
-    echo "     2) Win+V بزنید"
-    echo "     3) یا: ubuntu-clipboard --toggle"
-    echo "     4) ubuntu-clipboard --status  برای دیدن وضعیت"
-    echo "     5) ubuntu-clipboard --settings برای تنظیمات"
-  else
-    echo "  ✗ اجرا نشد — لاگ:"
-    cat /tmp/ubuntu-clipboard.log 2>/dev/null || echo "    (لاگ خالی)"
-    echo "  سعی کنید دستی: ubuntu-clipboard --debug"
-  fi
-fi
-echo ""
-echo "  برای عیب‌یابی: ubuntu-clipboard --status"
-echo "  برای تنظیمات: ubuntu-clipboard --settings"

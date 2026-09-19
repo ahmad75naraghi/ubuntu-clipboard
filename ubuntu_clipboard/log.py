@@ -1,79 +1,78 @@
-"""
-log.py — لاگ دقیق برای عیب‌یابی چشمک
-می‌نویسد به:
-  - /tmp/ubuntu-clipboard.log (موقت، هر اجرا overwrite)
-  - ~/.cache/ubuntu-clipboard/debug.log (دائمی، append با timestamp)
-  - stdout (برای --debug)
+"""Logging setup.
+
+A single rotating file under ``$XDG_CACHE_HOME/ubuntu-clipboard`` plus optional
+console output; the old implementation appended to three unbounded files.
 """
 
 from __future__ import annotations
+
+import contextlib
+import logging
+import logging.handlers
 import os
 import sys
-import time
 from pathlib import Path
-from datetime import datetime
 
-CACHE_LOG = Path.home() / ".cache" / "ubuntu-clipboard" / "debug.log"
-TMP_LOG = Path("/tmp/ubuntu-clipboard.log")
-# also legacy
-CONFIG_LOG = Path.home() / ".config" / "ubuntu-clipboard" / "debug.log"
+from .config import log_path
 
-def _ensure_dirs():
+_MAX_BYTES = 512 * 1024
+_BACKUPS = 2
+_FORMAT = "%(asctime)s %(levelname)-7s [%(process)d] %(name)s: %(message)s"
+_DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+_configured = False
+
+
+def setup_logging(debug: bool = False, console: bool = False) -> Path:
+    """Configure the root logger once. Returns the log file path."""
+    global _configured
+    target = log_path()
+    if _configured:
+        logging.getLogger().setLevel(logging.DEBUG if debug else logging.INFO)
+        return target
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG if debug else logging.INFO)
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+
     try:
-        CACHE_LOG.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_LOG.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+        target.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            target, maxBytes=_MAX_BYTES, backupCount=_BACKUPS, encoding="utf-8"
+        )
+        file_handler.setFormatter(logging.Formatter(_FORMAT, _DATEFMT))
+        root.addHandler(file_handler)
+    except OSError:  # read-only or missing home directory
+        target = Path(os.devnull)
 
-def _ts() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    if console or os.environ.get("UBUNTU_CLIPBOARD_DEBUG"):
+        stream = logging.StreamHandler(sys.stderr)
+        stream.setFormatter(logging.Formatter(_FORMAT, _DATEFMT))
+        root.addHandler(stream)
 
-def log(msg: str, level: str = "INFO"):
-    """نوشتن لاگ با timestamp به همه جا"""
-    _ensure_dirs()
-    line = f"[{_ts()}] [{level}] [PID:{os.getpid()}] {msg}"
-    # stdout always
+    # Third party chatter we never want in our logs.
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+    _configured = True
+    return target
+
+
+def tail(lines: int = 200) -> str:
+    """Return the last ``lines`` lines of the log file."""
+    path = log_path()
+    if not path.is_file():
+        return "(no log file yet)"
     try:
-        print(line, flush=True)
-    except Exception:
-        pass
-    # tmp log (overwrite per run? we append)
-    for p in [TMP_LOG, CACHE_LOG, CONFIG_LOG]:
-        try:
-            with open(p, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except Exception:
-            pass
+        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return f"(cannot read {path}: {exc})"
+    if lines <= 0:
+        return "\n".join(content)
+    return "\n".join(content[-lines:])
 
-def log_toggle(action: str, detail: str = ""):
-    log(f"TOGGLE {action} {detail}".strip(), "TOGGLE")
 
-def log_window(action: str, detail: str = ""):
-    log(f"WINDOW {action} {detail}".strip(), "WINDOW")
-
-def log_daemon(action: str, detail: str = ""):
-    log(f"DAEMON {action} {detail}".strip(), "DAEMON")
-
-def log_tray(action: str, detail: str = ""):
-    log(f"TRAY {action} {detail}".strip(), "TRAY")
-
-def log_error(msg: str):
-    log(msg, "ERROR")
-
-def clear_logs():
-    for p in [TMP_LOG, CACHE_LOG]:
-        try:
-            if p.exists():
-                p.unlink()
-        except Exception:
-            pass
-    log("=== LOG CLEARED ===")
-
-def tail_logs(n: int = 100) -> str:
-    try:
-        if CACHE_LOG.exists():
-            lines = CACHE_LOG.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
-            return "\n".join(lines[-n:])
-    except Exception as e:
-        return f"read log failed: {e}"
-    return "(no log)"
+def clear() -> None:
+    """Truncate the log file (keeps rotations intact)."""
+    path = log_path()
+    for candidate in (path, *(path.with_name(f"{path.name}.{i}") for i in range(1, _BACKUPS + 1))):
+        with contextlib.suppress(OSError):  # pragma: no cover - defensive
+            candidate.unlink(missing_ok=True)

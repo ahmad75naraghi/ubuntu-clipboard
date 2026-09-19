@@ -1,254 +1,556 @@
-# 📋 Ubuntu Clipboard — کلیپ‌بورد حرفه‌ای شبیه ویندوز 11 برای اوبونتو
+# 📋 Ubuntu Clipboard — تاریخچه کلیپ‌بورد شبیه ویندوز ۱۱
 
-> **Win+V** روی اوبونتو — دقیقا مثل ویندوز 11، زیبا، سریع و کامل
+> **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.1.4-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
+![Tests](https://img.shields.io/badge/tests-422%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
----
-
-## ✨ نمای کلی
-
-این پروژه یک **کلیپ‌بورد کامل و حرفه‌ای** برای اوبونتو است که تمام قابلیت‌های کلیپ‌بورد ویندوز 11 را با همان تجربه کاربری پیاده‌سازی می‌کند:
-
-- پنجره شناور شیشه‌ای (Acrylic) وسط صفحه با گوشه‌های گرد
-- تاریخچه 80+ آیتم با **جستجوی فوری**
-- سنجاق (📌 Pin)، حذف، پاک کردن همه
-- پشتیبانی **متن، کد، لینک، تصویر، فایل و رنگ**
-- **کلیک برای Paste** — مثل ویندوز، خودکار Ctrl+V می‌زند
-- اجرای پس‌زمینه (Daemon) + Autostart
-- **Win+V (Super+V)** — دقیقا همان میانبر ویندوز
-- سازگار با **Wayland و X11**، گنوم 42+، اوبونتو 22.04 تا 24.10
-- تم تاریک/روشن/سیستمی، تنظیمات کامل
-
 <p align="center">
-  <img src="ubuntu_clipboard/assets/preview.png" alt="Ubuntu Clipboard Preview" width="720" style="border-radius:14px; box-shadow:0 12px 40px rgba(0,0,0,0.25)"/>
+  <img src="docs/preview.jpg" alt="نمای پنجره Ubuntu Clipboard" width="820"/>
   <br/>
-  <em>طراحی الهام‌گرفته از Windows 11 — Acrylic + Mica</em>
+  <em>طراحی الهام‌گرفته از Windows 11 — پنجره بدون قاب، گوشه‌های گرد و شفافیت</em>
 </p>
 
 ---
 
-## 🎯 قابلیت‌ها — دقیقاً مثل ویندوز
+## ✨ این برنامه چه می‌کند؟
 
-| قابلیت ویندوز | وضعیت | توضیح |
-|---|---|---|
-| `Win+V` برای باز کردن | ✅ | میانبر سیستمی گنوم، قابل تغییر |
-| تاریخچه متنی | ✅ | تا 80 آیتم (قابل تنظیم تا 300) |
-| تصاویر | ✅ | PNG/JPG از کلیپ‌بورد، thumbnail |
-| سنجاق کردن | ✅ | تا 20 آیتم سنجاق، همیشه بالا |
-| جستجو | ✅ | فیلتر زنده داخل پنجره |
-| حذف تکی / پاک کردن همه | ✅ | با نگه‌داشتن سنجاق‌ها |
-| کلیک برای Paste | ✅ | کپی به کلیپ‌بورد + شبیه‌سازی Ctrl+V |
-| پیش‌نمایش رنگ و لینک | ✅ | تشخیص خودکار `#ff5500` و `https://` |
-| تشخیص کد | ✅ | هایلایت خودکار Python/JS/SQL/... |
-| فایل‌ها | ✅ | لیست URI فایل‌های کپی‌شده |
-| نادیده گرفتن رمزها | ✅ | Regex حساس، OTP و کارت بانکی |
-| Autostart | ✅ | اجرای خودکار پس از لاگین |
-| Wayland + X11 | ✅ | `wl-clipboard` / `xclip` / `wtype` / `xdotool` |
-| کیبورد کامل | ✅ | `↑↓` حرکت، `Enter` Paste، `Del` حذف، `Ctrl+P` سنجاق، `Esc` بستن |
+یک سرویس **مقیم (resident)** در پس‌زمینه اجرا می‌شود، هر چیزی که کپی می‌کنید را در یک
+دیتابیس SQLite ذخیره می‌کند و با زدن **Win+V** پنجره‌ای شبیه کلیپ‌بورد ویندوز ۱۱ باز
+می‌شود:
+
+- تاریخچه متن، لینک، کد، رنگ، تصویر و فایل
+- **جستجوی زنده** روی متن کامل آیتم‌ها
+- **سنجاق (Pin)** برای آیتم‌های همیشه‌در‌دسترس
+- **کلیک = Paste**: آیتم روی کلیپ‌بورد می‌رود و `Ctrl+V` خودکار در برنامه قبلی زده می‌شود
+- فیلتر خودکار رمزها و شماره کارت بانکی (الگوهای قابل تنظیم)
+- ناوبری کامل با کیبورد، تم تاریک/روشن/سیستمی، فارسی و انگلیسی
 
 ---
 
-## 🚀 نصب سریع (30 ثانیه)
+## 🎯 مقایسه با کلیپ‌بورد ویندوز
 
-### روش 1 — اسکریپت خودکار (پیشنهادی)
+| قابلیت ویندوز ۱۱ | وضعیت | توضیح |
+|---|---|---|
+| `Win+V` برای باز کردن | ✅ | میانبر GNOME، قابل تغییر در تنظیمات |
+| تاریخچه متنی | ✅ | پیش‌فرض ۸۰ آیتم، قابل تنظیم تا ۱۰۰۰ |
+| تصاویر | ✅ | ذخیره به‌صورت PNG با بندانگشتی |
+| سنجاق کردن | ✅ | پیش‌فرض ۲۰ آیتم، جدا از آیتم‌های اخیر |
+| جستجو | ✅ | فیلتر زنده، جستجو در محتوای کامل |
+| حذف تکی / پاک کردن همه | ✅ | با نگه‌داشتن آیتم‌های سنجاق‌شده |
+| Paste با یک کلیک | ✅ | Copy + شبیه‌سازی `Ctrl+V` |
+| تشخیص نوع محتوا | ✅ | متن، کد، لینک، رنگ، تصویر، فایل |
+| عدم ضبط رمز عبور | ✅ | Regex + علامت `x-kde-passwordManagerHint` |
+| اجرای خودکار پس از ورود | ✅ | فایل autostart در `~/.config/autostart` |
+
+---
+
+## 🚀 نصب
+
+### پیش‌نیازها
+
+| مورد | حداقل |
+|---|---|
+| اوبونتو | ۲۲.۰۴ (GNOME 42) |
+| Python | ۳.۱۰ |
+| GTK | ۴.۶ — `gir1.2-gtk-4.0` |
+| libadwaita | ۱.۰ — `gir1.2-adw-1` (اختیاری، برای ظاهر GNOME) |
+| کلیپ‌بورد | `wl-clipboard` (Wayland) یا `xclip` (X11) |
+| Paste خودکار | `wtype` / `ydotool` (Wayland) یا `xdotool` (X11) |
+
+> در صورت نبود libadwaita برنامه کار می‌کند؛ فقط پنجره ظاهر Adwaita ندارد.
+> در صورت نبود ابزار Paste، آیتم کپی می‌شود و پیام «کپی شد» نمایش داده می‌شود.
+
+### روش ۱ — اسکریپت نصب (پیشنهادی)
 
 ```bash
 git clone https://github.com/ahmad75naraghi/ubuntu-clipboard.git
 cd ubuntu-clipboard
-chmod +x scripts/install.sh
 ./scripts/install.sh
-# سپس Win+V را بزنید!
 ```
 
-اسکریپت به‌صورت خودکار:
-1. وابستگی‌ها را نصب می‌کند (`python3-gi`, `gir1.2-adw-1`, `wl-clipboard`, `xclip`, `xdotool`)
-2. پکیج را در `~/.local` نصب می‌کند
-3. Autostart می‌سازد
-4. میانبر **Super+V** را ثبت می‌کند
+اسکریپت به‌ترتیب این کارها را انجام می‌دهد:
 
-### روش 2 — دستی
+1. بسته‌های سیستمی لازم را بررسی و (با تأیید شما) با `apt-get` نصب می‌کند
+2. یک محیط مجازی **با دسترسی به بسته‌های سیستمی** در
+   `~/.local/share/ubuntu-clipboard/venv` می‌سازد (لازم برای PEP 668 در اوبونتو ۲۳.۰۴+)
+3. پکیج را در آن نصب می‌کند و دو اجراپذیر در `~/.local/bin` می‌گذارد
+4. با `ubuntu-clipboard --install` میان‌بر دسکتاپ، آیکون، autostart و میانبر Win+V را می‌سازد
+5. سرویس را در پس‌زمینه اجرا می‌کند و با `--status` موفقیت را بررسی می‌کند
+
+گزینه‌ها: `-y/--yes` (بدون پرسش)، `--no-apt` (نصب نکردن بسته‌های سیستمی)،
+`--no-start` (اجرا نکردن سرویس در پایان)، `-h/--help`.
+
+### روش ۲ — نصب دستی
 
 ```bash
 sudo apt update
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 wl-clipboard xclip xdotool wtype -y
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 \
+                 wl-clipboard xclip wtype xdotool
 
-pip install --user .
-
-# اجرای دستی
-ubuntu-clipboard --hidden &
-
-# ثبت میانبر (یا از Settings → Keyboard انجام دهید)
-./scripts/setup-shortcut.sh
+python3 -m venv --system-site-packages ~/.local/share/ubuntu-clipboard/venv
+~/.local/share/ubuntu-clipboard/venv/bin/pip install .
+~/.local/share/ubuntu-clipboard/venv/bin/ubuntu-clipboard --install   # میان‌برها و autostart
+~/.local/share/ubuntu-clipboard/venv/bin/ubuntu-clipboard --background # اجرای سرویس
 ```
 
-> **نکته Wayland:** در اوبونتو 22.04+ پیش‌فرض Wayland است. برای Paste خودکار، `wtype` یا `ydotool` نیاز است. اگر `wtype` در مخازن نبود، `xdotool` روی XWayland هم کار می‌کند، در غیر این‌صورت فقط Copy می‌شود و شما `Ctrl+V` می‌زنید.
+### روش ۳ — از مخزن، بدون نصب
+
+```bash
+python3 -m ubuntu_clipboard --install      # یک‌بار: میان‌بر دسکتاپ، آیکون، autostart، Win+V
+python3 -m ubuntu_clipboard --background   # اجرای سرویس
+python3 -m ubuntu_clipboard --toggle       # باز/بسته کردن پنجره
+```
+
+> اگر `~/.local/bin` در `PATH` نیست: `export PATH="$HOME/.local/bin:$PATH"` را به
+> `~/.profile` اضافه کنید.
 
 ---
 
-## 🎮 نحوه استفاده
+## 🎮 استفاده
 
-1. هر چیزی را **کپی** کنید (`Ctrl+C` یا کلیک راست)
-2. کلید **Win+V** (یا `Super+V`) را بزنید — پنجره شیشه‌ای باز می‌شود
-3. **جستجو** کنید یا اسکرول کنید
-4. روی آیتم **کلیک** کنید — خودکار در برنامه قبلی Paste می‌شود
-5. برای سنجاق: دکمه 📌 یا `Ctrl+P`
-6. برای حذف: 🗑️ یا `Del`
+1. هر جایی `Ctrl+C` بزنید — آیتم ذخیره می‌شود.
+2. **Win+V** را بزنید تا پنجره باز شود.
+3. تایپ کنید تا جستجو شود، یا با `↑`/`↓` حرکت کنید.
+4. `Enter` یا کلیک = Paste در همان برنامه‌ای که بودید.
 
-### میانبرهای کیبورد داخل پنجره
+### میان‌برهای داخل پنجره
 
 | کلید | عمل |
 |---|---|
-| `Esc` | بستن |
-| `↑` `↓` | حرکت |
+| `Esc` | بستن پنجره |
+| `↑` `↓` / `Tab` `Shift+Tab` | حرکت بین آیتم‌ها |
 | `Enter` | Paste آیتم انتخاب‌شده |
-| `Ctrl+1..9` | Paste سریع آیتم 1 تا 9 |
-| `Del` | حذف |
-| `Ctrl+P` | سنجاق/برداشتن |
+| `Ctrl+1` … `Ctrl+9` | Paste سریع آیتم‌های ۱ تا ۹ |
+| `Del` | حذف آیتم |
+| `Ctrl+P` | سنجاق / برداشتن سنجاق |
+| `Ctrl+,` | باز کردن تنظیمات |
+| `Ctrl+Q` | خروج کامل |
+
+با برداشتن فوکوس، پنجره به‌طور خودکار بسته می‌شود
+(قابل خاموش‌کردن با `close_on_focus_loss`).
+
+### Win+V در چیدمان‌های دیگر (فارسی، عربی، روسی …)
+
+گنوم میانبر را با کلیدِ **چیدمان فعال** تطبیق می‌دهد. در چیدمان فارسی، همان کلید فیزیکی
+`V` کاراکتر «ر» می‌فرستد و `<Super>v` هیچ‌وقت فعال نمی‌شد. هنگام نصب، جای فیزیکی همان
+کلید در همهٔ چیدمان‌های تنظیم‌شده خوانده می‌شود (`libxkbcommon`) و برای هر چیدمانی که
+کلیدش فرق دارد یک میانبر جدا ثبت می‌شود:
+
+| چیدمان | میانبر ثبت‌شده | نام در تنظیمات |
+|---|---|---|
+| English (US) | `<Super>v` | Clipboard — Win+V |
+| Persian | `<Super>Arabic_ra` | Clipboard — Win+V (Persian) |
+
+پس Win+V در هر دو چیدمان همان کلید فیزیکی است و لازم نیست چیدمان را عوض کنید.
+
+```bash
+ubuntu-clipboard --status       # خط «layouts»: همهٔ میانبرهای ثبت‌شده
+ubuntu-clipboard --diagnose     # «keyboard layouts» و «needed for them»
+```
+
+نصب دوباره چیزی را تکراری نمی‌کند، میانبرِ چیدمانی که حذف کرده‌اید خودش پاک می‌شود و
+`--remove-shortcut` همهٔ اسلات‌ها را برمی‌دارد. میانبرهایی که خودتان ساخته‌اید
+هیچ‌وقت دست‌کاری نمی‌شوند.
+
+---
+
+## ⌨️ خط فرمان
+
+هر فرمانی که به پنجره نیاز ندارد، بدون GTK و حتی روی SSH کار می‌کند.
+
+```
+ubuntu-clipboard [options]
+```
+
+| فرمان | کار |
+|---|---|
+| `--toggle` | باز/بسته کردن پنجره (پیش‌فرض) |
+| `--show` / `--hide` | نمایش / پنهان کردن پنجره |
+| `--settings` | پنجره تنظیمات |
+| `--quit` | خروج از نمونه در حال اجرا |
+| `--background` | اجرای سرویس بدون پنجره (همان `--daemon` قدیمی) |
+| `--list [N]` | چاپ N آیتم آخر (پیش‌فرض ۲۰) |
+| `--clear` | پاک کردن تاریخچه (سنجاق‌ها می‌مانند) |
+| `--all` | همراه `--clear`: سنجاق‌ها هم پاک شوند |
+| `--install` | ساخت میان‌بر، آیکون، autostart و Win+V |
+| `--uninstall` | حذف یکپارچگی دسکتاپ (تاریخچه می‌ماند) |
+| `--purge` | همراه `--uninstall`: حذف دیتابیس و تنظیمات |
+| `--install-shortcut` / `--remove-shortcut` | فقط میانبر Win+V |
+| `--take-binding` | همراه `--install` یا `--install-shortcut`: میانبرهای دیگری که
+همان کلید را گرفته‌اند هم حذف شوند |
+| `--binding KEYS` | همراه `--install` یا `--install-shortcut`: استفاده از کلید دیگر و
+ذخیرهٔ آن در تنظیمات |
+| `--diagnose` | بررسی گام‌به‌گام اینکه چرا Win+V پنجره را باز نمی‌کند |
+| `--setup-paste` | راه‌اندازی چسباندن خودکار (نصب ydotool و دیمن آن) |
+| `--yes` | همراه `--setup-paste`: بدون پرسیدن تأییدیه اجرا کن |
+| `--test-paste` | بعد از چند ثانیه `Ctrl+V` می‌فرستد تا ببینی چسباندن کار می‌کند یا نه |
+| `--delay SECONDS` | همراه `--test-paste`: فاصلهٔ پیش‌فرض (۵ ثانیه) را عوض کن |
+| `--item N` | همراه `--test-paste`: آیتم شمارهٔ N از `--list` را در کلیپ‌بورد بگذار |
+| `--status` | وضعیت کامل محیط، دیتابیس، میان‌بر و سرویس |
+| `--logs [N]` | چاپ N خط آخر لاگ (پیش‌فرض ۲۰۰) |
+| `--clear-logs` | پاک کردن فایل‌های لاگ |
+| `--collect-logs` | ساخت گزارش عیب‌یابی و چاپ مسیر آن |
+| `--debug` | لاگ کامل روی stderr |
+| `--version` | نمایش نسخه |
+
+```console
+$ ubuntu-clipboard --status
+Ubuntu Clipboard 2.1.4
+  python           3.11.2 (/usr/bin/python3)
+  session          wayland
+  database         /home/user/.local/share/ubuntu-clipboard/history.db
+  items            42 (pinned: 3, images: 5)
+  database size    312.4 KiB
+  configuration    /home/user/.config/ubuntu-clipboard/config.json
+  theme / language system / fa
+  desktop entry    /home/user/.local/share/applications/io.github.ahmad75naraghi.UbuntuClipboard.desktop (ok)
+  icon             installed
+  autostart        enabled
+  instance         running
+  auto paste       yes via xdotool
+  window backend   x11 (kept out of the dock)
+  tools            wl-copy=yes, wl-paste=yes, xclip=yes, xsel=no, xdotool=yes, wtype=no, ydotool=no
+  clipboard tools  readable / writable
+  shortcut         '<Super>v' -> '/usr/bin/python3 -m ubuntu_clipboard --toggle'
+  layouts          <Super>v, <Super>Arabic_ra>
+```
 
 ---
 
 ## ⚙️ تنظیمات
 
-داخل پنجره کلیپ‌بورد روی **⚙️** بزنید، یا فایل را ویرایش کنید:
+تنظیمات از پنجره **⚙️** یا با ویرایش
+`~/.config/ubuntu-clipboard/config.json` قابل تغییر است. مقدارهای نامعتبر
+به‌جای خطا، اصلاح و در لاگ ثبت می‌شوند.
 
-```json
-// ~/.config/ubuntu-clipboard/config.json
-{
-  "max_items": 80,
-  "pin_limit": 20,
-  "theme": "dark",
-  "window_width": 420,
-  "window_height": 560,
-  "keep_pinned_on_clear": true,
-  "exclude_sensitive": true
-}
-```
-
-| گزینه | توضیح |
-|---|---|
-| `max_items` | حداکثر تاریخچه (20–300) |
-| `theme` | `dark` / `light` / `system` |
-| `exclude_apps` | عدم ذخیره از اپ‌های حساس (Keepass...) |
-| `ignore_regex` | Regex برای نادیده گرفتن (رمزها) |
+| کلید | پیش‌فرض | بازه | توضیح |
+|---|---|---|---|
+| `max_items` | `80` | ۱۰–۱۰۰۰ | تعداد آیتم‌های اخیر |
+| `max_item_size_kb` | `512` | ۱–۱۰۲۴۰ | حداکثر اندازه متن |
+| `max_image_size_kb` | `8192` | ۶۴–۶۵۵۳۶ | حداکثر اندازه تصویر |
+| `pin_limit` | `20` | ۱–۲۰۰ | حداکثر آیتم‌های سنجاق |
+| `keep_pinned_on_clear` | `true` | — | نگه‌داشتن سنجاق‌ها هنگام «پاک کردن همه» |
+| `exclude_sensitive` | `true` | — | فیلتر رمزها و شماره کارت بانکی |
+| `ignore_regex` | الگوهای پیش‌فرض | — | الگوهای نادیده‌گرفتن (Regex پایتون) |
+| `theme` | `system` | — | `system` / `dark` / `light` |
+| `language` | `fa` | — | `fa` / `en` / `auto` |
+| `window_width` / `window_height` | `420` / `560` | ۳۲۰–۱۶۰۰ | اندازه پنجره |
+| `image_thumb_height` | `96` | ۴۰–۳۲۰ | ارتفاع بندانگشتی تصویر |
+| `close_on_focus_loss` | `true` | — | بستن پنجره با از‌دست‌رفتن فوکوس |
+| `hide_from_dock` | `true` | — | نمایش ندادن پنجره در داک و فهرست پنجره‌ها |
+| `auto_start` | `true` | — | اجرا در شروع نشست |
+| `shortcut` | `<Super>v` | — | میانبر پیشنهادی هنگام `--install` |
 
 ---
 
-## 🏗️ معماری فنی
+## 📁 مسیرها
+
+| چه چیزی | کجا |
+|---|---|
+| تاریخچه | `${XDG_DATA_HOME:-~/.local/share}/ubuntu-clipboard/history.db` |
+| تنظیمات | `${XDG_CONFIG_HOME:-~/.config}/ubuntu-clipboard/config.json` |
+| لاگ (چرخشی، ۳ فایل ۵۱۲KB) | `${XDG_CACHE_HOME:-~/.cache}/ubuntu-clipboard/ubuntu-clipboard.log` |
+| گزارش عیب‌یابی | `${XDG_CACHE_HOME:-~/.cache}/ubuntu-clipboard/diagnostics.txt` |
+| میان‌بر دسکتاپ | `~/.local/share/applications/io.github.ahmad75naraghi.UbuntuClipboard.desktop` |
+| autostart | `~/.config/autostart/io.github.ahmad75naraghi.UbuntuClipboard.desktop` |
+| آیکون | `~/.local/share/icons/hicolor/512x512/apps/ubuntu-clipboard.png` |
+
+---
+
+## 🏗️ معماری
 
 ```
-ubuntu-clipboard/
-├── ubuntu_clipboard/
-│   ├── app.py              # GtkApplication + D-Bus toggle
-│   ├── daemon.py           # مانیتور کلیپ‌بورد (poll + GDK signal)
-│   ├── history.py          # SQLite — تشخیص نوع، dedup، pin
-│   ├── clipboard.py        # abstraction Wayland/X11 (wl-paste/xclip/GDK)
-│   ├── paste.py            # شبیه‌سازی Ctrl+V (wtype/xdotool/ydotool)
-│   ├── config.py           # JSON config + ignore rules
-│   └── ui/
-│       ├── window.py       # پنجره اصلی — GTK4/Adw + Tkinter fallback
-│       ├── settings.py     # دیالوگ تنظیمات
-│       └── styles.css      # تم Acrylic ویندوز 11
-├── data/*.desktop          # Autostart
-└── scripts/*.sh            # install / shortcut
+ubuntu_clipboard/
+├── __init__.py      # نسخه، شناسه برنامه، نام آیکون
+├── cli.py           # تمام فرمان‌های خط فرمان (بدون نیاز به GTK در مسیرهای headless)
+├── app.py           # Gio.Application با HANDLES_COMMAND_LINE → تک‌نمونه + IPC روی D-Bus
+├── monitor.py       # مانیتور رویدادمحور کلیپ‌بورد روی Gdk.Clipboard (بدون polling)
+├── storage.py       # SQLite (WAL)، مهاجرت schema، dedup، جستجو، pin، آمار
+├── models.py        # تشخیص نوع محتوا، hash، پیش‌نمایش، زمان نسبی
+├── clipboard.py     # تشخیص نشست و توانمندی‌های محیط (Wayland/X11، ابزارهای متن)
+├── paste.py         # شبیه‌سازی Ctrl+V با ydotool/wtype/xdotool
+├── shortcut.py      # مدیریت میانبر GNOME با gsettings (بدون sed) + یک اسلات برای هر چیدمان
+├── keymap.py        # جای کلید در هر چیدمان صفحه‌کلید (libxkbcommon) برای Win+V در فارسی
+├── install.py       # میان‌بر دسکتاپ، آیکون، autostart، پاک‌سازی نسخه ۱
+├── config.py        # تنظیمات JSON + مسیرهای XDG + اعتبارسنجی + فیلتر محتوای حساس
+├── i18n.py          # ترجمه فارسی/انگلیسی + تشخیص RTL
+├── log.py           # لاگ چرخشی
+├── ui/
+│   ├── window.py    # پنجره اصلی GTK4 (بدون قاب، کنترل کامل با کیبورد)
+│   ├── settings.py  # پنجره تنظیمات (Adw.PreferencesWindow با fallback)
+│   ├── dialogs.py   # دیالوگ تأیید (Adw.MessageDialog / Gtk.AlertDialog)
+│   └── styles.css   # تم ویندوز ۱۱ فقط با ویژگی‌های پشتیبانی‌شده GTK4
+└── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
+tests/
+├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
+└── test_*.py        # ۴۲۲ تست
+scripts/
+├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
+├── uninstall.sh     # حذف کامل (با گزینه --purge)
+└── check_gtk_api.py # بررسی استاتیک APIهای GTK/GDK/Adw بدون نیاز به نمایشگر
 ```
 
-**جریان داده:**
+**جریان داده**
 
 ```
-[Ctrl+C in any app] → GDK clipboard changed / poll wl-paste → HistoryManager.add() → SQLite
-Win+V → D-Bus app.toggle → Window.present() → list(pinned+recent) → Click → write_text() → simulate_paste()
+Ctrl+C در هر برنامه
+      │  Gdk.Clipboard::changed
+      ▼
+monitor.ClipboardMonitor ──► storage.add_text/add_image/add_files ──► SQLite (WAL)
+      │                                      │
+      │                            dedup بر اساس hash + تازه‌سازی زمان
+      ▼
+Win+V ─► Gio.Application (تک‌نمونه، D-Bus) ─► ui.window.ClipboardWindow
+                                                   │
+                                     کلیک/Enter ───► clipboard.set_content + Ctrl+V
 ```
 
-- **Wayland:** `wl-paste` / `wl-copy` + `wtype` برای Paste
-- **X11:** `xclip` / `xsel` + `xdotool`
-- ذخیره: `~/.config/ubuntu-clipboard/history.db` (SQLite, hash dedup)
+تفاوت‌های کلیدی با نسخه ۱:
+
+| نسخه ۱ (مشکل‌دار) | نسخه ۲ |
+|---|---|
+| قفل فایل + `SIGKILL` برای تک‌نمونه‌سازی | `Gio.Application` با IPC روی D-Bus |
+| پنجره ۳۵۰ms بعد از Copy بسته می‌شد و محتوا از بین می‌رفت | فرآیند مقیم مالک انتخاب (selection) می‌ماند |
+| polling چهار بار در ثانیه با `wl-paste` | سیگنال `changed` و خواندن async |
+| `sed` روی `gsettings` با یکسان‌سازی `custom1` | پارس و بازنویسی فهرست در پایتون |
+| GTK3 + fallback به Tkinter | GTK4 + libadwaita (با fallback استاندارد) |
+| نشتی file descriptor و WAL غیرفعال | اتصال thread-local، `PRAGMA journal_mode=WAL` |
+| سه فایل لاگ بی‌نهایت | یک لاگ چرخشی |
+
+---
+
+## 🧪 توسعه
+
+```bash
+git clone https://github.com/ahmad75naraghi/ubuntu-clipboard.git
+cd ubuntu-clipboard
+
+python3 -m venv .venv
+.venv/bin/pip install pytest ruff
+.venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
+
+make test        # ۴۲۲ تست
+make lint        # ruff check + ruff format --check
+make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
+make check       # lint + test
+make run         # python3 -m ubuntu_clipboard --toggle
+```
+
+چون محیط توسعه و CI نمایشگر ندارند، درستی کار با GTK سه لایه تأیید می‌شود:
+
+1. **بررسی استاتیک** (`scripts/check_gtk_api.py`) نام‌های `Gtk.*`/`Gdk.*`/`Adw.*` و
+   متدهای هر کلاس را با stubهای PyGObject مقایسه می‌کند؛ مثلاً `Gdk.ToplevelState.ACTIVE`
+   (که وجود ندارد) یا یک متد اشتباه پیش از اجرا گرفته می‌شود.
+2. **تست‌های UI** (`tests/gtk_double.py`) یک جایگزین سبک برای GTK هستند تا منطق پنجره،
+   تنظیمات، مانیتور کلیپ‌بورد و منطق برنامه بدون نمایشگر تست شود (کلیک، کلیدها،
+   سنجاق، جستجو، فوکوس، نوتفیکیشن و ...).
+3. **تست‌های سرتاسری** (`tests/test_entrypoints.py`) همان `gi` جعلی را روی `PYTHONPATH`
+   می‌گذارند و برنامه را در یک **مفسر تازه** با `python -m ubuntu_clipboard` و
+   اسکریپت‌های نصب‌شده اجرا می‌کنند؛ بنابراین ترتیب import، پارس آرگومان‌ها، چرخهٔ
+   `Gtk.Application` و فایل‌های نوشته‌شده زیر `$XDG_*` هم واقعاً آزموده می‌شوند.
+
+ساختار تست‌ها: هر ماژول یک فایل `tests/test_*.py` با home مجزا (متغیرهای `XDG_*`
+موقت) و بدون نیاز به شبکه، نمایشگر یا سرویس خارجی.
 
 ---
 
 ## 🔧 عیب‌یابی
 
 **Win+V کار نمی‌کند؟**
+
 ```bash
-# بررسی
+ubuntu-clipboard --diagnose             # چک‌لیست کامل: برنامه، میانبر، تداخل‌ها، دیمن
+ubuntu-clipboard --install-shortcut     # ثبت مجدد میانبر (و هشدار تداخل‌ها)
+ubuntu-clipboard --status               # بررسی خط «shortcut»
 gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
-# ثبت مجدد
-./scripts/setup-shortcut.sh
-# یا دستی: Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → Add
-# Name: Clipboard  Command: ubuntu-clipboard --toggle  Shortcut: Super+V
 ```
 
-**Paste خودکار نمی‌شود (Wayland)؟**
+`--diagnose` همهٔ پیش‌نیازها را یکی‌یکی بررسی می‌کند: نصب بودن GTK 4، در حال اجرا بودن
+سرویس، ثبت بودن میانبر، وجود فایل فرمان، تداخل با میانبرهای دیگر یا میانبر پوستهٔ گنوم،
+زنده بودن `gsd-media-keys` و وضعیت چسباندن خودکار. در پایان فهرست مشکلات و سریع‌ترین
+راه‌حل‌ها را چاپ می‌کند.
+
+### Win+V در چیدمان فارسی کار نمی‌کند
+
+اگر روی چیدمان غیرلاتین Win+V پنجره را باز نمی‌کند، ببین برای آن چیدمان میانبری ثبت
+شده یا نه:
+
 ```bash
-sudo apt install wtype ydotool
-# ydotool نیاز به سرویس دارد:
-sudo systemctl enable --now ydotool
-# در غیر این‌صورت فقط Copy می‌شود — خودتان Ctrl+V بزنید
+ubuntu-clipboard --status          # خط layouts باید بیش از یک میانبر نشان بدهد
+ubuntu-clipboard --diagnose        # «keyboard layouts» و «needed for them»
+ubuntu-clipboard --install-shortcut   # ثبت دوباره؛ میانبر چیدمان‌ها اضافه می‌شود
 ```
 
-**پنجره باز نمی‌شود؟**
+اگر روی نسخهٔ قدیمی‌تر از ۲٫۱٫۴ نصب کرده‌اید، فقط `<Super>v` ثبت شده بود و در چیدمان
+فارسی کلید «ر» می‌فرستاد؛ یک بار `--install-shortcut` کافی است.
+
+### پنجره در داک اوبونتو دیده می‌شود
+
+گنوم به برنامه‌ای که بومی وی‌لند اجرا می‌شود هیچ راهی برای «در داک نبودن» نمی‌دهد؛
+پس به‌صورت پیش‌فرض پنجرهٔ برنامه از مسیر X11 (همان XWayland که خود گنوم اجرا می‌کند)
+باز می‌شود، چون فقط آن مسیر نشان `skip-taskbar` را می‌پذیرد. نشست همچنان وی‌لند است و
+چسباندن با همان `ydotool` انجام می‌شود؛ فقط پنجره در داک و فهرست پنجره‌ها نمی‌آید.
+
 ```bash
-cat /tmp/ubuntu-clipboard.log
-ubuntu-clipboard  # اجرای فورگراند برای دیدن خطا
+ubuntu-clipboard --status     # خط «window backend» را ببینید
 ```
 
-**GTK4 ندارم؟**
-- برنامه خودکار به **Tkinter fallback** می‌رود (ظاهر مشابه، بدون نیاز به GI)
-- برای تجربه کامل: `sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1`
+اگر XWayland در دسترس نباشد (سوکت نمایش محلی پاسخ ندهد)، برنامه به‌جای خراب‌شدن
+به‌صورت خودکار روی وی‌لند بومی اجرا می‌شود؛ در آن حالت پنجره در داک دیده می‌شود.
+
+در این حالت هم فیلتر رمزها کار می‌کند: نشانهٔ «ذخیره نکن» که مدیران رمز روی سمت
+وی‌لند می‌گذارند در سمت X11 وجود ندارد، پس برنامه پیش از ذخیره‌سازی همان نشانه را
+مستقیم از سمت وی‌لند می‌پرسد.
+
+اگر خواستید پنجره در داک بیاید (مثلاً برای جابه‌جایی با Alt+Tab):
+
+```bash
+UBUNTU_CLIPBOARD_BACKEND=wayland ubuntu-clipboard --toggle   # یک‌بار
+# یا همیشه: hide_from_dock را در ~/.config/ubuntu-clipboard/config.json
+# و از پنجرهٔ تنظیمات روی false بگذارید
+```
+
+### چسباندن خودکار (Paste) روی گنوم
+
+وقتی روی یک آیتم کلیک می‌کنید (یا Enter می‌زنید) آیتم در کلیپ‌بورد قرار می‌گیرد و پنجره
+بسته می‌شود. برای اینکه خودِ برنامه هم `Ctrl+V` را بفرستد، لینوکس به یک ابزار شبیه‌سازی
+کیبورد نیاز دارد؛ گنوم/وی‌لند به برنامه‌ها اجازهٔ فرستادن کلید نمی‌دهد، پس `ydotool`
+(که در سطح کرنل کار می‌کند) لازم است:
+
+```bash
+ubuntu-clipboard --setup-paste          # فهرست دستورها را نشان می‌دهد و می‌پرسد
+ubuntu-clipboard --setup-paste --yes    # بدون پرسیدن، همه را اجرا می‌کند
+```
+
+این دستور `ydotool`/`ydotoold` و `xdotool` را نصب می‌کند، سرویس کاربرِ `ydotoold` را
+می‌سازد و راه می‌اندازد و کاربر را به گروه `input` اضافه می‌کند. **یک‌بار logout/login
+لازم است** تا عضویت گروه فعال شود. بعد از آن Win+V آیتم را مستقیم در همان پنجره‌ای که
+مشغول تایپ هستید می‌چسباند.
+
+اگر نمی‌خواهی همین حالا logout کنی، این دو دستور موقتاً (تا ری‌استارت بعدی) مشکل را حل
+می‌کنند:
+
+```bash
+sudo chmod 666 /dev/uinput
+systemctl --user restart ydotoold
+ubuntu-clipboard --test-paste      # در ۵ ثانیهٔ آینده Ctrl+V می‌فرستد
+```
+
+`--test-paste` بعد از شمارش معکوس، همان میان‌بر چسباندن را می‌فرستد و می‌گوید کدام ابزار
+کار کرد؛ `--test-paste --item 2` هم اول آیتم شمارهٔ ۲ از `--list` را در کلیپ‌بورد می‌گذارد
+(و تأیید می‌کند که واقعاً آنجا نشسته است) و بعد `Ctrl+V` می‌فرستد. `--diagnose` اگر گروه
+`input` در نشست فعال نباشد همین را توضیح می‌دهد. دقت کن که `wtype` روی گنوم کار نمی‌کند
+(Mutter پروتکل کیبورد مجازی را ندارد) و `xdotool` هم فقط به پنجره‌های X11/XWayland
+می‌رسد — پس روی گنوم/وی‌لند تنها راه واقعی `ydotool` است.
+
+**چرا قبل از `Ctrl+V` کلیپ‌بورد «تأیید» می‌شود؟** نوشتن در کلیپ‌بورد و فشردن کلید دو
+سیستم جدا هستند و ممکن است کلید زودتر برسد؛ بعضی برنامه‌ها (به‌ویژه برنامه‌های جاوا مثل
+Android Studio که از سمت X11/XWayland می‌خوانند) در آن حالت *محتوای قبلی* را می‌چسبانند.
+از ۲.۱.۲ برنامه قبل از فرستادن کلید، محتوای کلیپ‌بورد را از هر دو سمت (وی‌لند و X11)
+می‌خواند و اگر لازم باشد با `wl-copy` و `xclip` هر دو سمت را بازنویسی می‌کند تا همان
+آیتمِ انتخاب‌شده در هر دو سمت بنشیند.
+
+تا وقتی این کار انجام نشده، برنامه صادقانه اطلاع می‌دهد: آیتم کپی می‌شود و باید خودتان
+`Ctrl+V` بزنید. `--status` هم در خط `auto paste` وضعیت واقعی را نشان می‌دهد
+(مثلاً `yes via ydotool` یا `no — ... run --setup-paste`).
+
+اگر میانبر دیگری هم روی همان کلید باشد، `--install-shortcut` هشدار می‌دهد و مسیر و
+فرمان آن را چاپ می‌کند (آن میانبر را دست نمی‌زنیم چون مال شماست)؛ در
+**Settings → Keyboard → Custom Shortcuts** آن را حذف یا جابه‌جا کنید، یا صریحاً بگویید
+که کلید را بردارد:
+
+```bash
+ubuntu-clipboard --take-binding --install-shortcut
+```
+
+> اگر میانبر متداخل مربوط به یک **کلیپ‌بورد منیجر دیگر** باشد (مثل `diodon`)، پیام
+> هشدار نام آن را هم می‌گوید. آن برنامه‌ها میانبر داخلی ندارند و فقط با یک
+> Custom Shortcut روی `<Super>v` می‌نشینند؛ دو کلیپ‌بورد منیجر با هم لازم نیست —
+> یکی را بردارید یا کلید دیگری به آن بدهید.
+
+اگر میانبر دیگری روی `<Super>v` باشد، `--install-shortcut` آن را غیرفعال می‌کند و
+هشدار می‌دهد. ممکن است لازم باشد یک بار از حساب خارج و دوباره وارد شوید.
+
+اگر `--install-shortcut` ناموفق بود، خودِ پیام خطای `gsettings` چاپ می‌شود؛ در آن صورت
+میانبر را دستی بسازید: **Settings → Keyboard → Custom Shortcuts** با فرمان
+`ubuntu-clipboard --toggle` و کلید `<Super>v`.
+
+برای بررسی دستی، توجه کنید که فهرست میانبرها در schema مادر و مقدارهای هر میانبر در
+schema فرزندِ قابل‌جابه‌جایی ذخیره می‌شوند:
+
+```bash
+# فهرست مسیرها (بدون path — schema مادر قابل‌جابه‌جایی نیست)
+gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
+# مقدارهای میانبر ما (path لازم است)
+gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/ binding
+```
+
+**پنجره باز می‌شود ولی Paste خودکار انجام نمی‌شود؟**
+
+```bash
+sudo apt install wtype      # یا: ydotool (روی Wayland)
+sudo apt install xdotool    # روی X11
+ubuntu-clipboard --status   # خط auto paste
+```
+
+بدون این ابزارها آیتم در کلیپ‌بورد قرار می‌گیرد و کافی است خودتان `Ctrl+V` بزنید.
+
+**برنامه اجرا نمی‌شود؟**
+
+```bash
+ubuntu-clipboard --debug        # لاگ کامل روی ترمینال
+ubuntu-clipboard --logs 100     # لاگ‌های قبلی
+ubuntu-clipboard --collect-logs # ساخت گزارش کامل برای ارسال در Issue
+```
+
+**GTK 4 نصب نیست؟**
+
+```bash
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1
+```
+
+فرمان‌های `--status`, `--list`, `--clear`, `--logs` بدون GTK هم کار می‌کنند.
+
+**می‌خواهم از داده‌های نسخه ۱ مهاجرت کنم:** لازم نیست کاری کنید؛ در اولین اجرا
+`~/.config/ubuntu-clipboard/history.db` به مسیر جدید منتقل و schema آن به‌روز
+می‌شود (تصاویر base64 قدیمی به BLOB تبدیل می‌شوند).
 
 ---
 
 ## 🗑️ حذف
 
 ```bash
-./scripts/uninstall.sh
-# یا دستی
-pip uninstall ubuntu-clipboard
-rm -rf ~/.config/ubuntu-clipboard
-```
-
----
-
-## 🤝 توسعه
-
-```bash
-git clone https://github.com/ahmad75naraghi/ubuntu-clipboard.git
-cd ubuntu-clipboard
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
-
-# اجرا در حالت توسعه
-python -m ubuntu_clipboard --hidden
-python -m ubuntu_clipboard.daemon --once  # تست تک‌شات
-```
-
-**اجرای تست‌ها:**
-
-```bash
-python -c "from ubuntu_clipboard.history import HistoryManager; hm=HistoryManager(); hm.add('Hello'); print(hm.list())"
+./scripts/uninstall.sh            # حذف یکپارچگی دسکتاپ (تاریخچه می‌ماند)
+./scripts/uninstall.sh --purge    # حذف کامل شامل تاریخچه و تنظیمات
 ```
 
 ---
 
 ## 📄 مجوز
 
-MIT — آزاد برای استفاده شخصی و تجاری.
-
----
-
-## 🇮🇷 فارسی
-
-این پروژه برای کاربران ایرانی اوبونتو ساخته شده تا تجربه‌ای **در حد ویندوز 11** داشته باشند — بدون نیاز به ویندوز! اگر خوشتان آمد ⭐ بدهید و با دوستان به اشتراک بگذارید.
-
-**ساخته‌شده با ❤️ برای جامعه اوبونتو ایران**
+MIT — استفاده شخصی و تجاری آزاد است. فایل [LICENSE](LICENSE) را ببینید.
 
 ---
 
 ## English Summary
 
-**Ubuntu Clipboard** is a Windows 11-like clipboard manager for Ubuntu. Press **Win+V** to open a floating acrylic window with searchable history, pins, and one-click paste. Works on Wayland & X11, GNOME 42+, built with GTK4/Libadwaita and Python. Install with `./scripts/install.sh`.
+**Ubuntu Clipboard** is a Windows 11 style clipboard manager for Ubuntu. A resident
+GTK 4 application (single instance over D-Bus, no lock files) keeps a searchable
+SQLite history of text, links, code, colours, images and files. Press **Win+V** to
+open a frameless floating window; click or hit `Enter` to paste into the previously
+focused application. Secrets and bank card numbers are filtered out by default, the
+clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
+module outside `ui/` is importable without a display, which is what the 422 headless
+tests exercise. The popup is kept out of the Ubuntu dock, and picking an item
+cancels any paste that is still on its way. Shortcuts are registered per keyboard layout,
+so the same physical keys open it in Persian, Arabic or Russian as well.
 
+```bash
+git clone https://github.com/ahmad75naraghi/ubuntu-clipboard.git
+cd ubuntu-clipboard && ./scripts/install.sh
+```
