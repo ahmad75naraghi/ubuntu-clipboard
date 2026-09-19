@@ -1,686 +1,516 @@
-"""
-window.py — پنجره اصلی کلیپ‌بورد (Win+V)
-سعی می‌کند GTK4 + Libadwaita را بارگذاری کند، در غیر این‌صورت Tkinter fallback زیبا.
-"""
+"""The ``Win+V`` popup window (GTK 4, optionally styled by libadwaita)."""
 
 from __future__ import annotations
-import os
-import base64
-import html
-from pathlib import Path
 
-from ..history import HistoryManager, ClipboardItem
-from ..config import get_config
-from ..clipboard import write_text, write_image_b64
-from ..paste import simulate_paste
-try:
-    from ..log import log, log_window
-    _HAS_LOG=True
-except Exception:
-    _HAS_LOG=False
-    def log(m,l="INFO"): print(m)
-    def log_window(a,b=""): print(f"WINDOW {a} {b}")
+import contextlib
+import logging
+import time
+from collections import OrderedDict
 
-# ─── تلاش برای GTK ───
-_HAS_GTK = False
-try:
-    import gi
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Gdk", "4.0")
-    try:
-        gi.require_version("Adw", "1")
-        from gi.repository import Adw
-        _HAS_ADW = True
-    except Exception:
-        _HAS_ADW = False
-        Adw = None
-    from gi.repository import Gtk, Gdk, GLib, Gio, Pango
-    _HAS_GTK = True
-except Exception:
-    _HAS_GTK = False
-    _HAS_ADW = False
+from .. import APP_ICON
+from ..i18n import t
+from ..models import ClipboardItem, ContentType, file_preview, format_size
+from . import Gdk, GLib, Gtk, Pango
 
-# ─── HELPER: رنگ و آیکون نوع ───
+log = logging.getLogger(__name__)
+
+#: Largest number of decoded thumbnails kept in memory.
+THUMBNAIL_CACHE = 24
+#: Ignore focus changes right after being presented.
+FOCUS_GRACE_SECONDS = 0.35
+
 TYPE_ICON = {
-    "text": "📄",
-    "code": "⌘",
-    "link": "🔗",
-    "image": "🖼️",
-    "file": "📁",
-    "color": "🎨",
-}
-TYPE_LABEL = {
-    "text": "متن",
-    "code": "کد",
-    "link": "لینک",
-    "image": "تصویر",
-    "file": "فایل",
-    "color": "رنگ",
+    ContentType.TEXT: "📄",
+    ContentType.CODE: "⌨",
+    ContentType.LINK: "🔗",
+    ContentType.IMAGE: "🖼",
+    ContentType.FILE: "📁",
+    ContentType.COLOR: "🎨",
 }
 
-# ─══════════════════════════════════════════
-# GTK4 IMPLEMENTATION
-# ═══════════════════════════════════════════
-if _HAS_GTK:
 
-    CSS_PATH = Path(__file__).parent / "styles.css"
+class ClipboardWindow(Gtk.ApplicationWindow):  # type: ignore[misc]
+    """Frameless, keyboard driven list of clipboard items."""
 
-    class ClipboardWindow(Gtk.ApplicationWindow if not _HAS_ADW else Adw.ApplicationWindow):
-        def __init__(self, app, history: HistoryManager):
-            cfg = get_config()
-            super().__init__(application=app)
-            self.history = history
-            self.cfg = cfg
-            self._query = ""
-            self._selected_idx = 0
-            self._items: list[ClipboardItem] = []
+    def __init__(self, app) -> None:
+        super().__init__(application=app)
+        self.app = app
+        self.config = app.config
+        self.store = app.store
+        self._items: list[ClipboardItem] = []
+        self._selected = 0
+        self._thumbnails: OrderedDict[int, object] = OrderedDict()
+        self._refresh_pending = False
+        self._was_active = False
+        self._focus_grace_until = 0.0
+        self._focus_handler = None
 
-            if _HAS_LOG: log_window("CREATE", f"size={cfg.window_width}x{cfg.window_height} theme={cfg.theme}")
-            self.set_title("Clipboard")
-            self.set_default_size(cfg.window_width, cfg.window_height)
-            # آیکون برای جلوگیری از Unknown در داک
-            try:
-                self.set_icon_name("ubuntu-clipboard")
-            except Exception:
-                pass
-            try:
-                # WM class برای تطابق با .desktop
-                self.set_property("application-id", "com.ubuntu.clipboard")
-            except Exception:
-                pass
-            self.set_resizable(True)
-            # شیشه‌ای و شناور
-            self.add_css_class("clipboard-window")
-            if cfg.theme == "light":
-                self.add_css_class("light")
-            self.set_decorated(False)
+        self.set_title(t("app.name"))
+        self.set_default_size(self.config.window_width, self.config.window_height)
+        self.set_resizable(True)
+        self.set_decorated(False)
+        with contextlib.suppress(AttributeError, TypeError):  # pragma: no cover - GTK4 always has it
+            self.set_icon_name(APP_ICON)
+        self.add_css_class("clipboard-window")
 
-            # سایه و موقعیت وسط صفحه
-            # css
-            self._load_css()
+        self._build()
+        self._install_controllers()
+        self.apply_theme(app.dark_mode)
+        self.apply_config()
 
-            # ساختار اصلی
-            outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            self.set_content(outer) if _HAS_ADW else self.set_child(outer)
+    # ── construction ───────────────────────────────────────────────────────
+    def _build(self) -> None:
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_child(root)
 
-            # ── HEADER ──
-            header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-            header.add_css_class("header")
-            if cfg.theme == "light":
-                header.add_css_class("light")
-            outer.append(header)
+        header = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        header.add_css_class("header")
 
-            top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-            top_row.set_margin_start(16); top_row.set_margin_end(16)
-            top_row.set_margin_top(14); top_row.set_margin_bottom(8)
-            header.append(top_row)
+        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True)
+        title = Gtk.Label(label=t("app.name"), xalign=0)
+        title.add_css_class("title-label")
+        subtitle = Gtk.Label(label=t("app.subtitle"), xalign=0)
+        subtitle.add_css_class("subtitle-label")
+        titles.append(title)
+        titles.append(subtitle)
+        top_row.append(titles)
 
-            titles = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            title_lbl = Gtk.Label(label="Clipboard", xalign=0)
-            title_lbl.add_css_class("title-label")
-            subtitle = Gtk.Label(label="تاریخچه کلیپ‌بورد  •  Win+V", xalign=0)
-            subtitle.add_css_class("subtitle-label")
-            titles.append(title_lbl); titles.append(subtitle)
-            top_row.append(titles)
+        self.clear_button = Gtk.Button(label=t("action.clear"))
+        self.clear_button.add_css_class("clear-btn")
+        self.clear_button.set_tooltip_text(t("action.clear_history"))
+        self.clear_button.connect("clicked", self._on_clear_clicked)
+        top_row.append(self.clear_button)
 
-            # spacer
-            top_row.append(Gtk.Box(hexpand=True))
+        self.settings_button = Gtk.Button(icon_name="emblem-system-symbolic")
+        self.settings_button.add_css_class("icon-btn")
+        self.settings_button.set_tooltip_text(t("action.settings"))
+        self.settings_button.connect("clicked", lambda *_: self.app.show_settings())
+        top_row.append(self.settings_button)
 
-            # clear button
-            clear_btn = Gtk.Button(label="پاک کردن همه")
-            clear_btn.add_css_class("clear-btn")
-            clear_btn.connect("clicked", lambda *_: self._on_clear())
-            top_row.append(clear_btn)
+        self.close_button = Gtk.Button(icon_name="window-close-symbolic")
+        self.close_button.add_css_class("icon-btn")
+        self.close_button.set_tooltip_text(t("action.close"))
+        self.close_button.connect("clicked", lambda *_: self.hide_window())
+        top_row.append(self.close_button)
 
-            # settings
-            settings_btn = Gtk.Button()
-            settings_btn.set_icon_name("emblem-system-symbolic")
-            settings_btn.add_css_class("icon-btn")
-            settings_btn.set_tooltip_text("تنظیمات")
-            settings_btn.connect("clicked", lambda *_: self._open_settings())
-            top_row.append(settings_btn)
+        header.append(top_row)
 
-            # close
-            close_btn = Gtk.Button()
-            close_btn.set_icon_name("window-close-symbolic")
-            close_btn.add_css_class("icon-btn")
-            close_btn.connect("clicked", lambda *_: self.close())
-            top_row.append(close_btn)
+        self.search_entry = Gtk.SearchEntry()
+        self.search_entry.set_placeholder_text(t("search.placeholder"))
+        self.search_entry.add_css_class("search-entry")
+        self.search_entry.set_hexpand(True)
+        self.search_entry.connect("search-changed", self._on_search_changed)
+        header.append(self.search_entry)
 
-            # search
-            search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            search_row.set_margin_start(16); search_row.set_margin_end(16)
-            search_row.set_margin_bottom(12)
-            header.append(search_row)
+        # A frameless window needs an explicit drag area.
+        self.handle = Gtk.WindowHandle()
+        self.handle.set_child(header)
+        root.append(self.handle)
 
-            self.search_entry = Gtk.SearchEntry()
-            self.search_entry.set_placeholder_text("جستجو در کلیپ‌بورد…")
-            self.search_entry.add_css_class("search-entry")
-            if cfg.theme == "light":
-                self.search_entry.add_css_class("light")
-            self.search_entry.set_hexpand(True)
-            self.search_entry.connect("search-changed", self._on_search)
-            search_row.append(self.search_entry)
+        self.scrolled = Gtk.ScrolledWindow()
+        self.scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.scrolled.set_vexpand(True)
+        self.scrolled.set_kinetic_scrolling(True)
+        root.append(self.scrolled)
 
-            # ── BODY ──
-            self.scrolled = Gtk.ScrolledWindow()
-            self.scrolled.set_vexpand(True)
-            self.scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            outer.append(self.scrolled)
+        self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.list_box.add_css_class("list-area")
+        self.scrolled.set_child(self.list_box)
 
-            self.list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-            self.list_box.set_margin_top(8); self.list_box.set_margin_bottom(8)
-            self.scrolled.set_child(self.list_box)
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        footer.add_css_class("footer")
+        self.hint_label = Gtk.Label(label=t("footer.hints"), xalign=0, hexpand=True)
+        self.count_label = Gtk.Label(label="")
+        footer.append(self.hint_label)
+        footer.append(self.count_label)
+        root.append(footer)
 
-            # pinned label
-            self.pinned_label = Gtk.Label(label="📌 سنجاق‌شده", xalign=0)
-            self.pinned_label.add_css_class("pin-section-label")
+    def _install_controllers(self) -> None:
+        keys = Gtk.EventControllerKey()
+        # Capture phase: the search entry takes focus, but Up/Down/Return/Delete
+        # must still drive the list instead of being swallowed by the text widget.
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(keys)
+        self.connect("close-request", self._on_close_request)
+        self.connect("map", self._on_mapped)
+        self.connect("unmap", self._on_unmapped)
+        self.connect("notify::is-active", self._on_active_changed)
 
-            # empty state
-            self.empty_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-            self.empty_box.add_css_class("empty-state")
-            self.empty_box.set_halign(Gtk.Align.CENTER)
-            self.empty_box.set_valign(Gtk.Align.CENTER)
-            self.empty_box.set_margin_top(48)
-            icon = Gtk.Label(label="📋")
-            icon.add_css_class("empty-icon")
-            self.empty_box.append(icon)
-            self.empty_box.append(Gtk.Label(label="کلیپ‌بورد خالی است"))
-            sub = Gtk.Label(label="هر چیزی کپی کنید اینجا ظاهر می‌شود")
-            sub.add_css_class("subtitle-label")
-            self.empty_box.append(sub)
-            hint = Gtk.Label(label="Ctrl+C  →  Win+V  →  Click to paste")
-            hint.add_css_class("meta-label")
-            hint.set_margin_top(12)
-            self.empty_box.append(hint)
+    # ── public API ─────────────────────────────────────────────────────────
+    def apply_config(self) -> None:
+        """Re-read sizes/theme after the settings changed."""
+        self.config = self.app.config
+        self.set_default_size(self.config.window_width, self.config.window_height)
+        self.apply_theme(self.app.dark_mode)
+        self._thumbnails.clear()
+        self.refresh(force=True)
 
-            # ── FOOTER ──
-            footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            footer.add_css_class("footer")
-            outer.append(footer)
-            footer.append(Gtk.Label(label="↵ Paste   ↑↓ حرکت   Del حذف   Ctrl+P سنجاق   Esc بستن"))
-            footer.append(Gtk.Box(hexpand=True))
-            count_lbl = Gtk.Label(label="")
-            self.count_label = count_lbl
-            footer.append(count_lbl)
+    def apply_theme(self, dark: bool) -> None:
+        """Switch between the dark and light stylesheet variants."""
+        self.remove_css_class("light")
+        self.remove_css_class("dark")
+        self.add_css_class("dark" if dark else "light")
+        # The search entry is an inner node, so it needs its own class.
+        self.search_entry.remove_css_class("light")
+        if not dark:
+            self.search_entry.add_css_class("light")
 
-            # key controller
-            key = Gtk.EventControllerKey()
-            key.connect("key-pressed", self._on_key)
-            self.add_controller(key)
+    def refresh(self, force: bool = False) -> None:
+        """Rebuild the list from the store (coalesced through the main loop)."""
+        if not force and not self.get_visible():
+            return
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
 
-            # click outside to close?
-            # focus
-            self.connect("show", lambda *_: (log_window("SHOW", "window shown") if _HAS_LOG else None, self._refresh())[1])
-            self.connect("hide", lambda *_: log_window("HIDE", "window hidden") if _HAS_LOG else None)
-            self.connect("close-request", lambda *_: (log_window("CLOSE_REQUEST", "") if _HAS_LOG else None, False)[1])
-
-        def _load_css(self):
-            try:
-                provider = Gtk.CssProvider()
-                provider.load_from_path(str(CSS_PATH))
-                Gtk.StyleContext.add_provider_for_display(
-                    Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-                )
-            except Exception:
-                pass
-
-        # ── data ──
-        def _refresh(self):
-            if _HAS_LOG: log_window("REFRESH", f"query={self._query!r}")
-            items = self.history.list(query=self._query, limit=150)
-            self._items = items
-            # clear
-            while True:
-                child = self.list_box.get_first_child()
-                if not child:
-                    break
-                self.list_box.remove(child)
-
-            if not items:
-                self.list_box.append(self.empty_box)
-                self.count_label.set_label("")
-                return
-
-            pinned = [x for x in items if x.pinned]
-            recent = [x for x in items if not x.pinned]
-
-            if pinned and not self._query:
-                self.list_box.append(self.pinned_label)
-                for it in pinned:
-                    self.list_box.append(self._row(it))
-                sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                sep.set_margin_top(8); sep.set_margin_bottom(4)
-                sep.set_opacity(0.12)
-                self.list_box.append(sep)
-                lbl = Gtk.Label(label="🕘 اخیر", xalign=0)
-                lbl.add_css_class("pin-section-label")
-                self.list_box.append(lbl)
-                for it in recent:
-                    self.list_box.append(self._row(it))
-            else:
-                for it in items:
-                    self.list_box.append(self._row(it))
-
-            self.count_label.set_label(f"{len(items)} آیتم")
-            # select first
-            self._selected_idx = 0
-            self._update_selection()
-
-        def _row(self, item: ClipboardItem) -> Gtk.Widget:
-            cfg = self.cfg
-            card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-            card.add_css_class("item-card")
-            if cfg.theme == "light":
-                card.add_css_class("light")
-            if item.pinned:
-                card.add_css_class("pinned")
-
-            # clickable
-            gesture = Gtk.GestureClick()
-            gesture.connect("pressed", lambda g,n,x,y: self._on_paste(item))
-            card.add_controller(gesture)
-
-            # icon
-            icon_lbl = Gtk.Label(label=TYPE_ICON.get(item.type, "📄"))
-            icon_lbl.set_size_request(32, 32)
-            icon_lbl.set_valign(Gtk.Align.START)
-            icon_lbl.set_margin_top(2)
-            card.append(icon_lbl)
-
-            # center
-            center = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            center.set_hexpand(True)
-            card.append(center)
-
-            # preview
-            if item.type == "image":
-                # thumbnail
-                try:
-                    raw = base64.b64decode(item.content)
-                    # use Gtk.Picture from bytes via GdkPixbuf?
-                    from gi.repository import GdkPixbuf
-                    import io
-                    loader = GdkPixbuf.PixbufLoader()
-                    loader.write(raw); loader.close()
-                    pix = loader.get_pixbuf()
-                    if pix:
-                        # scale
-                        w = pix.get_width(); h = pix.get_height()
-                        maxw = 320
-                        if w > maxw:
-                            pix = pix.scale_simple(maxw, int(h*maxw/w), GdkPixbuf.InterpType.BILINEAR)
-                        pic = Gtk.Picture.new_for_pixbuf(pix)
-                        pic.set_size_request(-1, 80)
-                        pic.set_keep_aspect_ratio(True)
-                        center.append(pic)
-                except Exception:
-                    pass
-                prev = Gtk.Label(label="تصویر  •  کلیک برای Paste", xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
-            elif item.type == "color":
-                prev = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                swatch = Gtk.Box()
-                swatch.set_size_request(18,18)
-                # css color via style?
-                try:
-                    prov = Gtk.CssProvider()
-                    prov.load_from_data(f"* {{ background: {item.content.strip()}; border-radius: 4px; }}".encode())
-                    swatch.get_style_context().add_provider(prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-                except Exception:
-                    pass
-                prev.append(swatch)
-                lbl = Gtk.Label(label=item.content.strip(), xalign=0)
-                lbl.add_css_class("preview-label")
-                prev.append(lbl)
-                # wrap helper
-                center.append(prev)
-                prev = None
-            else:
-                # text/code/link/file
-                txt = item.preview
-                # for file list, show each file
-                if item.type == "file":
-                    txt = item.content[:220].replace("file://","").replace("\n","  •  ")
-                lbl = Gtk.Label(label=txt, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=3, ellipsize=Pango.EllipsizeMode.END)
-                lbl.add_css_class("preview-label")
-                if cfg.theme == "light":
-                    lbl.add_css_class("light")
-                prev = lbl
-
-            if prev is not None:
-                center.append(prev)
-
-            # meta row
-            meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            badge = Gtk.Label(label=TYPE_LABEL.get(item.type, item.type).upper())
-            badge.add_css_class("type-badge"); badge.add_css_class(item.type)
-            meta.append(badge)
-            time_lbl = Gtk.Label(label=item.time_ago, xalign=0)
-            time_lbl.add_css_class("meta-label")
-            meta.append(time_lbl)
-            # size hint
-            if item.type != "image":
-                sz = len(item.content.encode("utf-8"))
-                if sz > 1024:
-                    meta.append(Gtk.Label(label=f"• {sz//1024}KB", xalign=0))
-                    meta.get_last_child().add_css_class("meta-label")
-            center.append(meta)
-
-            # actions
-            actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-            actions.set_valign(Gtk.Align.CENTER)
-            card.append(actions)
-
-            pin_btn = Gtk.Button()
-            pin_btn.set_icon_name("view-pin-symbolic" if not item.pinned else "view-pin-symbolic")
-            pin_btn.add_css_class("icon-btn")
-            if item.pinned:
-                pin_btn.add_css_class("pinned-active")
-            pin_btn.set_tooltip_text("برداشتن سنجاق" if item.pinned else "سنجاق کردن  (Ctrl+P)")
-            pin_btn.connect("clicked", lambda *_: self._on_pin(item))
-            actions.append(pin_btn)
-
-            del_btn = Gtk.Button()
-            del_btn.set_icon_name("user-trash-symbolic")
-            del_btn.add_css_class("icon-btn")
-            del_btn.set_tooltip_text("حذف  (Del)")
-            del_btn.connect("clicked", lambda *_: self._on_delete(item))
-            actions.append(del_btn)
-
-            # store item id on widget
-            card._item_id = item.id
-            return card
-
-        def _update_selection(self):
-            # highlight first? for keyboard nav we add 'selected' class
-            idx = 0
-            child = self.list_box.get_first_child()
-            while child:
-                if child.get_first_child():  # skip labels/separators
-                    pass
-                # check if is item-card
-                if child.has_css_class("item-card"):
-                    if idx == self._selected_idx:
-                        child.add_css_class("selected")
-                    else:
-                        child.remove_css_class("selected")
-                    idx += 1
-                child = child.get_next_sibling()
-
-        # ── events ──
-        def _on_search(self, entry):
-            self._query = entry.get_text()
-            self._refresh()
-
-        def _on_key(self, ctrl, keyval, keycode, state):
-            name = Gdk.keyval_name(keyval)
-            # Esc close
-            if name == "Escape":
-                self.close()
-                return True
-            if name == "Down":
-                self._selected_idx = min(self._selected_idx+1, len(self._items)-1)
-                self._update_selection()
-                return True
-            if name == "Up":
-                self._selected_idx = max(self._selected_idx-1, 0)
-                self._update_selection()
-                return True
-            if name in ("Return", "KP_Enter"):
-                if 0 <= self._selected_idx < len(self._items):
-                    self._on_paste(self._items[self._selected_idx])
-                return True
-            if name == "Delete":
-                if 0 <= self._selected_idx < len(self._items):
-                    self._on_delete(self._items[self._selected_idx])
-                return True
-            # Ctrl+P pin
-            if (state & Gdk.ModifierType.CONTROL_MASK) and name and name.lower() == "p":
-                if 0 <= self._selected_idx < len(self._items):
-                    self._on_pin(self._items[self._selected_idx])
-                return True
-            # numbers paste
-            if name and name.isdigit() and (state & Gdk.ModifierType.CONTROL_MASK):
-                idx = int(name)-1
-                if 0 <= idx < len(self._items):
-                    self._on_paste(self._items[idx])
-                return True
+        def rebuild() -> bool:
+            self._refresh_pending = False
+            self._rebuild()
             return False
 
-        def _on_pin(self, item: ClipboardItem):
-            self.history.toggle_pin(item.id)
-            self._refresh()
+        GLib.idle_add(rebuild)
 
-        def _on_delete(self, item: ClipboardItem):
-            self.history.delete(item.id)
-            self._refresh()
+    def hide_window(self) -> None:
+        self.hide()
 
-        def _on_clear(self):
-            # dialog
-            dlg = Gtk.MessageDialog(
-                transient_for=self, modal=True, message_type=Gtk.MessageType.WARNING,
-                buttons=Gtk.ButtonsType.OK_CANCEL, text="پاک کردن همه؟"
-            )
-            dlg.set_property("secondary-text", "آیتم‌های سنجاق‌شده نگه داشته می‌شوند. مطمئن هستید؟")
-            dlg.connect("response", lambda d, r: (d.close(), self._do_clear() if r == Gtk.ResponseType.OK else None))
-            dlg.present()
+    # ── list building ──────────────────────────────────────────────────────
+    def _rebuild(self) -> None:
+        query = self.search_entry.get_text() if self.search_entry else ""
+        items = self.store.list(query=query, limit=200)
+        self._items = items
+        self._selected = min(self._selected, max(0, len(items) - 1))
 
-        def _do_clear(self):
-            self.history.clear(keep_pinned=get_config().keep_pinned_on_clear)
-            self._refresh()
+        child = self.list_box.get_first_child()
+        while child is not None:
+            self.list_box.remove(child)
+            child = self.list_box.get_first_child()
 
-        def _on_paste(self, item: ClipboardItem):
-            if _HAS_LOG: log_window("PASTE", f"id={item.id} type={item.type}")
-            # copy to clipboard then simulate paste — hide, paste, then close window so process exits
-            self.set_visible(False)
-            # small delay to let window hide and focus return
-            def do():
-                try:
-                    if item.type == "image":
-                        ok = write_image_b64(item.content)
-                    else:
-                        ok = write_text(item.content)
-                    if ok:
-                        GLib.timeout_add(160, lambda: (simulate_paste(delay=0.05), False))
-                except Exception:
-                    pass
-                # close window after paste so lock is cleared and no flicker
-                GLib.timeout_add(350, lambda: (self.close(), False)[1])
-                return False
-            GLib.timeout_add(80, do)
+        if not items:
+            self.list_box.append(self._build_empty_state(query))
+            self.count_label.set_label("")
+            return
 
-        def _open_settings(self):
-            from .settings import show_settings
-            show_settings(self, self.history)
+        pinned = [item for item in items if item.pinned]
+        recent = [item for item in items if not item.pinned]
+        if pinned and not query:
+            self.list_box.append(self._section_label(t("section.pinned")))
+            for item in pinned:
+                self.list_box.append(self._build_row(item))
+            if recent:
+                self.list_box.append(self._section_label(t("section.recent")))
+            display = recent
+        else:
+            display = items
+        for item in display:
+            self.list_box.append(self._build_row(item))
 
-        def toggle_visible(self):
-            if _HAS_LOG: log_window("TOGGLE", f"is_visible={self.is_visible()}")
-            if self.is_visible():
-                if _HAS_LOG: log_window("TOGGLE_HIDE", "closing")
-                self.close()
-            else:
-                self._refresh()
-                self.present()
-                # center on screen
-                self.search_entry.grab_focus()
+        self.count_label.set_label(t("count.items", count=len(items)))
+        self._update_selection()
+        self.scrolled.get_vadjustment().set_value(0)
 
-else:
-    # ─══════════════════════════════════════════
-    # TKINTER FALLBACK (for CI / preview without GTK)
-    # ═══════════════════════════════════════════
-    _HAS_TK = False
-    _TK_IMPORT_ERROR = None
-    try:
-        import tkinter as tk
-        from tkinter import ttk, messagebox
-        _HAS_TK = True
-    except ImportError as _e:
-        _HAS_TK = False
-        _TK_IMPORT_ERROR = _e
-        tk = None
-        messagebox = None
-        print(f"⚠️  tkinter نصب نیست: {_e}")
-        print("   نصب: sudo apt install python3-tk -y")
-        print("   یا:  sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1  (پیشنهادی)")
+    def _build_empty_state(self, query: str) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.add_css_class("empty-state")
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_valign(Gtk.Align.CENTER)
+        box.set_vexpand(True)
+        icon = Gtk.Label(label="📋")
+        icon.add_css_class("empty-icon")
+        box.append(icon)
+        box.append(Gtk.Label(label=t("empty.title") if not query else t("empty.hint")))
+        hint = Gtk.Label(label=t("empty.tip"))
+        hint.add_css_class("subtitle-label")
+        box.append(hint)
+        return box
+
+    def _section_label(self, text: str) -> Gtk.Widget:
+        label = Gtk.Label(label=text, xalign=0)
+        label.add_css_class("section-label")
+        return label
+
+    def _build_row(self, item: ClipboardItem) -> Gtk.Widget:
+        dark = self.app.dark_mode
+        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        card.add_css_class("item-card")
+        if not dark:
+            card.add_css_class("light")
+        if item.pinned:
+            card.add_css_class("pinned")
+
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        content.set_hexpand(True)
+        content.set_valign(Gtk.Align.CENTER)
+        card.append(content)
+
+        icon = Gtk.Label(label=TYPE_ICON.get(item.type, "📄"))
+        icon.add_css_class("item-icon")
+        icon.set_valign(Gtk.Align.START)
+        content.append(icon)
+
+        center = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        center.set_hexpand(True)
+        content.append(center)
+        center.append(self._build_payload(item, dark))
+        center.append(self._build_meta(item))
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        actions.set_valign(Gtk.Align.CENTER)
+        card.append(actions)
+
+        pin_button = Gtk.Button(icon_name="view-pin-symbolic")
+        pin_button.add_css_class("icon-btn")
+        if item.pinned:
+            pin_button.add_css_class("pinned-active")
+        pin_button.set_tooltip_text(t("action.unpin") if item.pinned else t("action.pin"))
+        pin_button.connect("clicked", lambda *_: self._on_pin(item))
+        actions.append(pin_button)
+
+        delete_button = Gtk.Button(icon_name="user-trash-symbolic")
+        delete_button.add_css_class("icon-btn")
+        delete_button.set_tooltip_text(t("action.delete"))
+        delete_button.connect("clicked", lambda *_: self._on_delete(item))
+        actions.append(delete_button)
+
+        # The gesture lives on the content area only: the v1 code attached it to
+        # the whole card, so clicking pin/trash pasted the item as a side effect.
+        gesture = Gtk.GestureClick()
+        gesture.set_button(1)
+        gesture.connect("pressed", lambda *_: self._activate(item))
+        content.add_controller(gesture)
+        return card
+
+    def _build_payload(self, item: ClipboardItem, dark: bool) -> Gtk.Widget:
+        if item.type is ContentType.IMAGE:
+            preview = self._build_image_preview(item)
+            if preview is not None:
+                return preview
+        if item.type is ContentType.COLOR:
+            return self._build_color_preview(item)
+        label = Gtk.Label(xalign=0, wrap=True, wrap_mode=Gtk.WrapMode.WORD_CHAR, lines=3)
+        label.add_css_class("preview-label")
+        if not dark:
+            label.add_css_class("light")
+        if item.type is ContentType.IMAGE:
+            label.set_label(f"{t('preview.image')} — {t('preview.image_hint')}")
+        elif item.type is ContentType.FILE:
+            label.set_label(self._file_preview(item))
+        else:
+            label.set_label(item.preview)
+            if item.type is ContentType.CODE:
+                label.add_css_class("mono")
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        return label
+
+    def _build_image_preview(self, item: ClipboardItem) -> Gtk.Widget | None:
+        texture = self._texture_for(item)
+        if texture is None:
+            return None
+        picture = Gtk.Picture.new_for_paintable(texture)
+        picture.set_can_shrink(True)
+        picture.set_content_fit(Gtk.ContentFit.CONTAIN)
+        picture.set_size_request(180, self.config.image_thumb_height)
+        return picture
+
+    def _texture_for(self, item: ClipboardItem):
+        cached = self._thumbnails.get(item.id)
+        if cached is not None:
+            self._thumbnails.move_to_end(item.id)
+            return cached
         try:
-            import subprocess, shutil
-            if shutil.which("notify-send"):
-                subprocess.run(["notify-send", "Ubuntu Clipboard", "tkinter نصب نیست\n sudo apt install python3-tk  یا  python3-gi"], timeout=2)
-            if shutil.which("zenity"):
-                subprocess.Popen(["zenity","--error","--text=tkinter نصب نیست\nsudo apt install python3-tk\nیا python3-gi برای تجربه کامل","--title=Clipboard Error"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            data = self.store.get_image_bytes(item.id)
+            if not data:
+                return None
+            texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
         except Exception:
-            pass
+            log.debug("cannot decode thumbnail for item %s", item.id, exc_info=True)
+            return None
+        self._thumbnails[item.id] = texture
+        while len(self._thumbnails) > THUMBNAIL_CACHE:
+            self._thumbnails.popitem(last=False)
+        return texture
 
-    class ClipboardWindow:
-        """Fallback زیبا با Tkinter — استایل ویندوز 11"""
-        def __init__(self, app=None, history: HistoryManager = None):
-            if not _HAS_TK:
-                from ..history import HistoryManager as _HM
-                self.history = history or _HM()
-                self.cfg = get_config()
-                self._query = ""
-                self._root = None
-                self._list_frame = None
-                self._search_var = None
-                print("✗ GUI toolkit موجود نیست — تنها دیمن فعال است")
-                print("  sudo apt install python3-tk python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 -y")
-                return
-            self.history = history or HistoryManager()
-            self.cfg = get_config()
-            self._query = ""
-            self._root = None
-            self._list_frame = None
-            self._search_var = None
+    def _build_color_preview(self, item: ClipboardItem) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        color = item.preview.strip()
+        swatch = Gtk.DrawingArea()
+        swatch.set_content_width(18)
+        swatch.set_content_height(18)
+        swatch.set_draw_func(self._draw_swatch, color)
+        row.append(swatch)
+        label = Gtk.Label(label=color, xalign=0)
+        label.add_css_class("preview-label")
+        row.append(label)
+        return row
 
-        def _ensure(self):
-            if not _HAS_TK:
-                print("✗ tkinter موجود نیست — نمی‌توان پنجره را باز کرد")
-                try:
-                    import subprocess, shutil
-                    if shutil.which("notify-send"):
-                        subprocess.run(["notify-send","Clipboard","GUI toolkit موجود نیست — sudo apt install python3-tk"], timeout=2)
-                except Exception: pass
-                return
-            if self._root and self._root.winfo_exists():
-                return
-            self._root = tk.Tk()
-            self._root.title("Clipboard — Win+V")
-            self._root.geometry(f"{self.cfg.window_width}x{self.cfg.window_height}")
-            self._root.configure(bg="#202124")
-            self._root.overrideredirect(False)
-            self._root.attributes("-topmost", True)
-            # rounded via? Tk doesn't support blur, simulate with colors
-            self._build()
+    @staticmethod
+    def _draw_swatch(_area: Gtk.DrawingArea, cr, width: int, height: int, color: str) -> None:
+        rgba = Gdk.RGBA()
+        if not rgba.parse(color):
+            rgba.parse("#888888")
+        cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, rgba.alpha)
+        cr.rectangle(0, 0, width, height)
+        cr.fill()
+        cr.set_source_rgba(0.5, 0.5, 0.5, 0.4)
+        cr.set_line_width(1)
+        cr.rectangle(0.5, 0.5, max(0, width - 1), max(0, height - 1))
+        cr.stroke()
 
-        def _build(self):
-            r = self._root
-            # header
-            header = tk.Frame(r, bg="#202124", padx=16, pady=12)
-            header.pack(fill="x")
-            tk.Label(header, text="Clipboard", fg="white", bg="#202124", font=("Segoe UI", 13, "bold")).pack(anchor="w")
-            tk.Label(header, text="تاریخچه کلیپ‌بورد  •  Win+V", fg="#9aa0a6", bg="#202124", font=("Segoe UI", 9)).pack(anchor="w")
-            # search
-            search_frame = tk.Frame(header, bg="#202124")
-            search_frame.pack(fill="x", pady=(10,0))
-            self._search_var = tk.StringVar()
-            self._search_var.trace_add("write", lambda *_: self._refresh())
-            e = tk.Entry(search_frame, textvariable=self._search_var, bg="#303134", fg="white", insertbackground="white", relief="flat", font=("Segoe UI", 10))
-            e.pack(fill="x", ipady=6, padx=2)
-            e.insert(0, "")
-            e.bind("<KeyRelease>", lambda evt: None)
+    def _build_meta(self, item: ClipboardItem) -> Gtk.Widget:
+        meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        badge = Gtk.Label(label=item.display_type)
+        badge.add_css_class("type-badge")
+        badge.add_css_class(item.type.value)
+        meta.append(badge)
+        time_label = Gtk.Label(label=item.relative_time(), xalign=0)
+        time_label.add_css_class("meta-label")
+        meta.append(time_label)
+        size = item.size_label if item.type is ContentType.IMAGE else format_size(item.size_bytes)
+        if size:
+            size_label = Gtk.Label(label=f"• {size}", xalign=0)
+            size_label.add_css_class("meta-label")
+            meta.append(size_label)
+        return meta
 
-            # controls
-            ctrl = tk.Frame(header, bg="#202124")
-            ctrl.pack(fill="x", pady=(8,0))
-            tk.Button(ctrl, text="پاک کردن همه", command=self._on_clear, bg="#303134", fg="white", relief="flat", padx=10, pady=4).pack(side="right", padx=4)
-            tk.Button(ctrl, text="✕ بستن", command=self.hide, bg="#303134", fg="white", relief="flat").pack(side="right")
+    def _file_preview(self, item: ClipboardItem) -> str:
+        text = self.store.get_text(item.id) or item.content or ""
+        uris = [line for line in text.splitlines() if line.strip()] or item.uris()
+        return file_preview(uris) if uris else item.preview
 
-            # scrolled list
-            container = tk.Frame(r, bg="#202124")
-            container.pack(fill="both", expand=True, padx=8, pady=8)
-            canvas = tk.Canvas(container, bg="#202124", highlightthickness=0)
-            scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
-            self._list_frame = tk.Frame(canvas, bg="#202124")
-            self._list_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-            canvas.create_window((0,0), window=self._list_frame, anchor="nw")
-            canvas.configure(yscrollcommand=scrollbar.set)
-            canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
+    # ── selection & scrolling ──────────────────────────────────────────────
+    def _rows(self) -> list[Gtk.Widget]:
+        rows: list[Gtk.Widget] = []
+        child = self.list_box.get_first_child()
+        while child is not None:
+            if child.has_css_class("item-card"):
+                rows.append(child)
+            child = child.get_next_sibling()
+        return rows
 
-            # footer
-            footer = tk.Frame(r, bg="#2a2b2e", padx=12, pady=8)
-            footer.pack(fill="x", side="bottom")
-            tk.Label(footer, text="↵ Paste   Del حذف   Ctrl+P سنجاق   Esc بستن", fg="#9aa0a6", bg="#2a2b2e", font=("Segoe UI", 8)).pack(side="left")
-            self._root.bind("<Escape>", lambda *_: self.hide())
-            self._root.bind("<Control-p>", lambda *_: None)
+    def _update_selection(self) -> None:
+        rows = self._rows()
+        for index, row in enumerate(rows):
+            if index == self._selected:
+                if not row.has_css_class("selected"):
+                    row.add_css_class("selected")
+            elif row.has_css_class("selected"):
+                row.remove_css_class("selected")
+        if 0 <= self._selected < len(rows):
+            self._scroll_into_view(rows[self._selected])
 
-        def _refresh(self, *args):
-            if not self._root or not self._root.winfo_exists():
-                return
-            query = self._search_var.get() if self._search_var else ""
-            items = self.history.list(query=query, limit=120)
-            for w in self._list_frame.winfo_children():
-                w.destroy()
-            if not items:
-                tk.Label(self._list_frame, text="📋\nکلیپ‌بورد خالی است\nهر چیزی کپی کنید اینجا ظاهر می‌شود", fg="#9aa0a6", bg="#202124", justify="center", font=("Segoe UI", 10)).pack(pady=40)
-                return
-            for it in items:
-                card = tk.Frame(self._list_frame, bg="#303134", padx=10, pady=10)
-                card.pack(fill="x", pady=3)
-                # type badge
-                top = tk.Frame(card, bg="#303134")
-                top.pack(fill="x")
-                tk.Label(top, text=TYPE_ICON.get(it.type,"📄") + " " + TYPE_LABEL.get(it.type,it.type), fg="#8ab4f8", bg="#202124", font=("Segoe UI", 8, "bold"), padx=6, pady=2).pack(side="left")
-                tk.Label(top, text=it.time_ago, fg="#9aa0a6", bg="#303134", font=("Segoe UI", 8)).pack(side="left", padx=8)
-                if it.pinned:
-                    tk.Label(top, text="📌", bg="#303134", fg="#8ab4f8").pack(side="right")
-                preview = it.preview[:220].replace("\n"," ")
-                if it.type == "image":
-                    preview = "🖼️  تصویر — کلیک برای Paste"
-                tk.Label(card, text=preview, fg="white", bg="#303134", anchor="w", justify="left", wraplength=360, font=("Segoe UI", 10)).pack(fill="x", pady=(6,4))
-                btns = tk.Frame(card, bg="#303134")
-                btns.pack(fill="x")
-                tk.Button(btns, text="Paste", command=lambda it=it: self._on_paste(it), bg="#8ab4f8", fg="#202124", relief="flat", padx=10).pack(side="left")
-                tk.Button(btns, text="📌 سنجاق" if not it.pinned else "برداشتن", command=lambda it=it: self._on_pin(it), bg="#3c4043", fg="white", relief="flat", padx=8).pack(side="left", padx=4)
-                tk.Button(btns, text="🗑️ حذف", command=lambda it=it: self._on_delete(it), bg="#3c4043", fg="white", relief="flat", padx=8).pack(side="left")
-                card.bind("<Button-1>", lambda e, it=it: self._on_paste(it))
+    def _move_selection(self, delta: int) -> None:
+        rows = self._rows()
+        if not rows:
+            return
+        self._selected = max(0, min(len(rows) - 1, self._selected + delta))
+        self._update_selection()
 
-        def _on_pin(self, it: ClipboardItem):
-            self.history.toggle_pin(it.id); self._refresh()
-        def _on_delete(self, it: ClipboardItem):
-            self.history.delete(it.id); self._refresh()
-        def _on_clear(self):
-            if messagebox.askyesno("پاک کردن همه؟", "آیتم‌های سنجاق‌شده نگه داشته می‌شوند."):
-                self.history.clear(keep_pinned=True); self._refresh()
-        def _on_paste(self, it: ClipboardItem):
-            self.hide()
-            self._root.after(180, lambda: self._do_paste(it))
-        def _do_paste(self, it: ClipboardItem):
-            try:
-                if it.type == "image":
-                    write_image_b64(it.content)
-                else:
-                    write_text(it.content)
-                simulate_paste(delay=0.12)
-            except Exception:
-                pass
+    def _scroll_into_view(self, row: Gtk.Widget) -> None:
+        try:
+            ok, bounds = row.compute_bounds(self.list_box)
+        except (TypeError, AttributeError):  # pragma: no cover - ancient GTK
+            return
+        if not ok:
+            return
+        adjustment = self.scrolled.get_vadjustment()
+        top = bounds.get_y()
+        bottom = top + bounds.get_height()
+        value = adjustment.get_value()
+        page = adjustment.get_page_size()
+        if top < value:
+            adjustment.set_value(max(0.0, top - 8))
+        elif bottom > value + page:
+            adjustment.set_value(bottom - page + 8)
 
-        def toggle_visible(self):
-            self._ensure()
-            if self._root.state() == "withdrawn" or not self._root.winfo_viewable():
-                self._root.deiconify(); self._root.lift(); self._root.focus_force()
-                self._refresh()
-            else:
-                self.hide()
-        def hide(self):
-            if self._root:
-                self._root.withdraw()
-        def present(self): self.toggle_visible()
-        def set_visible(self, v: bool):
-            self._ensure()
-            if v: self._root.deiconify()
-            else: self.hide()
-        def is_visible(self):
-            return bool(self._root and self._root.winfo_viewable())
-        def show(self):
-            self._ensure(); self._root.deiconify(); self._root.mainloop()
+    # ── events ─────────────────────────────────────────────────────────────
+    def _on_search_changed(self, _entry) -> None:
+        self._selected = 0
+        self._rebuild()
+
+    def _on_key_pressed(self, _controller, keyval, _keycode, state) -> bool:
+        key = Gdk.keyval_name(keyval) or ""
+        control = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        selected = self._items[self._selected] if 0 <= self._selected < len(self._items) else None
+
+        if key == "Escape":
+            self.hide_window()
+            return True
+        if key in {"Up", "KP_Up"}:
+            self._move_selection(-1)
+            return True
+        if key in {"Down", "KP_Down"}:
+            self._move_selection(1)
+            return True
+        if key in {"Return", "KP_Enter"}:
+            if selected is not None:
+                self._activate(selected)
+            return True
+        if control and key in {"p", "P"}:
+            if selected is not None:
+                self._on_pin(selected)
+            return True
+        if control and key.isdigit() and key != "0":
+            index = int(key) - 1
+            if 0 <= index < len(self._items):
+                self._activate(self._items[index])
+            return True
+        if key in {"Delete", "KP_Delete"}:
+            # While the user is editing a search term, Delete belongs to the
+            # text field; only an empty search box may delete a history item.
+            editing = bool(self.search_entry.has_focus() and self.search_entry.get_text())
+            if not editing and selected is not None:
+                self._on_delete(selected)
+                return True
+            return False
+        if key == "Tab" and self._rows():
+            backwards = bool(state & Gdk.ModifierType.SHIFT_MASK)
+            self._move_selection(-1 if backwards else 1)
+            return True
+        return False
+
+    def _activate(self, item: ClipboardItem) -> None:
+        log.debug("pasting item %s", item.id)
+        self.app.paste_item(item)
+
+    def _on_pin(self, item: ClipboardItem) -> None:
+        self.store.toggle_pin(item.id)
+        self.refresh(force=True)
+
+    def _on_delete(self, item: ClipboardItem) -> None:
+        self.store.delete(item.id)
+        self.refresh(force=True)
+
+    def _on_clear_clicked(self, _button) -> None:
+        from .dialogs import confirm
+
+        keep_pinned = self.config.keep_pinned_on_clear
+        body = t("dialog.clear.body") if keep_pinned else t("dialog.clear.body_all")
+        if confirm(self, t("dialog.clear.title"), body):
+            self.app.clear_history()
+            self.refresh(force=True)
+
+    def _on_close_request(self, *_args) -> bool:
+        self.hide_window()
+        return True  # keep the window (and the process) alive
+
+    def _on_mapped(self, *_args) -> None:
+        self._focus_grace_until = time.monotonic() + FOCUS_GRACE_SECONDS
+        self.refresh(force=True)
+        self.search_entry.grab_focus()
+
+    def _on_unmapped(self, *_args) -> None:
+        self._was_active = False
+
+    def _on_active_changed(self, *_args) -> None:
+        """Hide the popup when it loses focus, like Windows 11 does."""
+        if self.is_active():
+            self._was_active = True
+            return
+        if (
+            self.config.close_on_focus_loss
+            and self._was_active
+            and time.monotonic() > self._focus_grace_until
+        ):
+            self._was_active = False
+            self.hide_window()

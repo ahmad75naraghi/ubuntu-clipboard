@@ -1,42 +1,72 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ubuntu-clipboard"
-version = "1.0.0"
-description = "کلیپ‌بورد حرفه‌ای اوبونتو — شبیه ویندوز 11 با Win+V | Windows-like Clipboard for Ubuntu"
+version = "2.0.0"
+description = "Windows 11 style clipboard history for Ubuntu (Win+V)"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
-authors = [{name="Ubuntu Clipboard"}]
-keywords = ["clipboard", "ubuntu", "gnome", "wayland", "gtk", "win+v"]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "ubuntu-clipboard contributors" }]
+keywords = ["clipboard", "ubuntu", "gnome", "wayland", "gtk", "win+v", "clipboard-manager"]
 classifiers = [
+  "Development Status :: 5 - Production/Stable",
   "Environment :: X11 Applications :: GTK",
+  "Intended Audience :: End Users/Desktop",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Desktop Environment :: Gnome",
+  "Topic :: Utilities",
 ]
-dependencies = [
-  "Pillow>=10.0",
-  "pystray>=0.19",
-]
+# PyGObject, GTK 4 and (optionally) libadwaita come from the distribution
+# (`python3-gi`, `gir1.2-gtk-4.0`, `gir1.2-adw-1`) because they are not
+# installable from PyPI in a usable way. The package itself is pure Python.
+dependencies = []
 
 [project.optional-dependencies]
-dev = ["pygobject", "pycairo"]
+test = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
-ubuntu-clipboard = "ubuntu_clipboard.app:main"
-ubuntu-clipboard-daemon = "ubuntu_clipboard.daemon:main"
+ubuntu-clipboard = "ubuntu_clipboard.cli:main"
+ubuntu-clipboard-daemon = "ubuntu_clipboard.cli:main_daemon"
 
 [project.urls]
 Repository = "https://github.com/ahmad75naraghi/ubuntu-clipboard"
+Issues = "https://github.com/ahmad75naraghi/ubuntu-clipboard/issues"
 
 [tool.setuptools.packages.find]
 include = ["ubuntu_clipboard*"]
 
 [tool.setuptools.package-data]
-ubuntu_clipboard = ["ui/styles.css", "assets/*.png", "assets/*.jpg"]
+ubuntu_clipboard = ["ui/*.css", "assets/hicolor/512x512/apps/*.png"]
 
-[tool.setuptools.exclude-package-data]
-"*" = ["__pycache__"]
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+src = ["ubuntu_clipboard", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RET", "PIE", "ARG", "LOG", "G"]
+ignore = [
+  "E501",    # line length is handled by the formatter
+  "B008",    # function calls in argument defaults are fine here
+  "N818",    # exceptions do not need an Error suffix
+  "ARG002",  # unused method arguments are dictated by GTK signal signatures
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test doubles and monkeypatched callables legitimately ignore their arguments.
+"tests/*" = ["ARG", "B011"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["error::DeprecationWarning:ubuntu_clipboard.*"]
