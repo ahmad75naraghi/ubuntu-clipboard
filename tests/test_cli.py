@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 
 import pytest
@@ -503,6 +504,7 @@ def test_display_backend_prefers_x11_to_stay_out_of_the_dock(monkeypatch):
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
     monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setattr(cli, "x11_available", lambda *a, **k: True)
     assert cli.display_backend(hide_from_dock=True) == "x11"
     assert cli.display_backend(hide_from_dock=False) == "wayland"
 
@@ -515,6 +517,35 @@ def test_display_backend_can_be_overridden(monkeypatch):
     assert cli.display_backend(hide_from_dock=True) == "wayland"
     monkeypatch.setenv("UBUNTU_CLIPBOARD_BACKEND", "x11")
     assert cli.display_backend(hide_from_dock=False) == "x11"
+
+
+def test_display_backend_falls_back_when_xwayland_is_not_reachable(monkeypatch):
+    """A stale or forwarded DISPLAY must not divert the window to X11."""
+    monkeypatch.delenv("UBUNTU_CLIPBOARD_BACKEND", raising=False)
+    monkeypatch.delenv("GDK_BACKEND", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.setattr(cli, "x11_available", lambda *a, **k: False)
+    assert cli.display_backend(hide_from_dock=True) == "wayland"
+
+
+def test_x11_availability_is_probed_over_the_unix_socket(tmp_path, monkeypatch):
+    """There is a real listener on the socket in this test, not a fake."""
+    monkeypatch.delenv("DISPLAY", raising=False)
+    assert cli.x11_available({}, socket_dir=tmp_path) is False
+    assert cli.x11_available({"DISPLAY": "localhost:10"}, socket_dir=tmp_path) is False
+    assert cli.x11_available({"DISPLAY": ":abcdef"}, socket_dir=tmp_path) is False
+
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(tmp_path / "X7"))
+    listener.listen(1)
+    try:
+        assert cli.x11_available({"DISPLAY": ":7"}, socket_dir=tmp_path) is True
+        assert cli.x11_available({"DISPLAY": ":7.0"}, socket_dir=tmp_path) is True
+        assert cli.x11_available({"DISPLAY": ":8"}, socket_dir=tmp_path) is False
+    finally:
+        listener.close()
 
 
 def test_display_backend_without_xwayland_stays_on_wayland(monkeypatch):

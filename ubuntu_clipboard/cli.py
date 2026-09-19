@@ -13,6 +13,7 @@ import argparse
 import logging
 import os
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -716,6 +717,38 @@ def cmd_diagnose(config: Config) -> int:
 BACKEND_ENV = "UBUNTU_CLIPBOARD_BACKEND"
 
 
+#: Where X servers keep their local sockets (XWayland included).
+X11_SOCKET_DIR = Path("/tmp/.X11-unix")
+
+
+def x11_available(
+    env: dict[str, str] | None = None,
+    socket_dir: Path = X11_SOCKET_DIR,
+) -> bool:
+    """Whether ``DISPLAY`` points at a *live* local X server.
+
+    Only a local display can be XWayland: forwarding ``DISPLAY`` (SSH, a nested
+    session) must not divert the application to a backend it cannot open.
+    """
+    environment = os.environ if env is None else env
+    display = environment.get("DISPLAY", "")
+    if not display.startswith(":"):
+        return False
+    number = display[1:].split(".")[0]
+    if not number.isdigit():
+        return False
+    path = str(socket_dir / f"X{number}")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.25)
+        for address in (path, "\0" + path):  # filesystem, then abstract socket
+            try:
+                probe.connect(address)
+            except OSError:
+                continue
+            return True
+    return False
+
+
 def display_backend(hide_from_dock: bool | None = None) -> str:
     """The display backend the windowed application will use.
 
@@ -734,7 +767,7 @@ def display_backend(hide_from_dock: bool | None = None) -> str:
         return os.environ["GDK_BACKEND"]
     if hide_from_dock is None:
         hide_from_dock = get_config().hide_from_dock
-    if hide_from_dock and detect_session() == "wayland" and os.environ.get("DISPLAY"):
+    if hide_from_dock and detect_session() == "wayland" and x11_available():
         return "x11"
     return detect_session()
 

@@ -6,7 +6,7 @@
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
-![Tests](https://img.shields.io/badge/tests-380%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-382%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 <p align="center">
@@ -263,7 +263,7 @@ ubuntu_clipboard/
 └── assets/hicolor/512x512/apps/ubuntu-clipboard.png   # آیکون برنامه
 tests/
 ├── gtk_double.py    # جایگزین سبک GTK برای تست رابط کاربری بدون نمایشگر
-└── test_*.py        # ۳۸۰ تست
+└── test_*.py        # ۳۸۲ تست
 scripts/
 ├── install.sh       # نصب بسته‌های سیستمی + محیط مجازی + یکپارچگی دسکتاپ
 ├── uninstall.sh     # حذف کامل (با گزینه --purge)
@@ -309,7 +309,7 @@ python3 -m venv .venv
 .venv/bin/pip install pytest ruff
 .venv/bin/pip install --no-deps PyGObject-stubs   # برای بررسی استاتیک GTK
 
-make test        # ۳۸۰ تست
+make test        # ۳۸۲ تست
 make lint        # ruff check + ruff format --check
 make gtk-check   # بررسی استاتیک APIهای GTK/GDK/Adw
 make check       # lint + test
@@ -360,6 +360,9 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 ```bash
 ubuntu-clipboard --status     # خط «window backend» را ببینید
 ```
+
+اگر XWayland در دسترس نباشد (سوکت نمایش محلی پاسخ ندهد)، برنامه به‌جای خراب‌شدن
+به‌صورت خودکار روی وی‌لند بومی اجرا می‌شود؛ در آن حالت پنجره در داک دیده می‌شود.
 
 در این حالت هم فیلتر رمزها کار می‌کند: نشانهٔ «ذخیره نکن» که مدیران رمز روی سمت
 وی‌لند می‌گذارند در سمت X11 وجود ندارد، پس برنامه پیش از ذخیره‌سازی همان نشانه را
@@ -503,7 +506,7 @@ SQLite history of text, links, code, colours, images and files. Press **Win+V** 
 open a frameless floating window; click or hit `Enter` to paste into the previously
 focused application. Secrets and bank card numbers are filtered out by default, the
 clipboard is monitored through `Gdk.Clipboard` signals instead of polling, and every
-module outside `ui/` is importable without a display, which is what the 380 headless
+module outside `ui/` is importable without a display, which is what the 382 headless
 tests exercise. The popup is kept out of the Ubuntu dock, and picking an item
 cancels any paste that is still on its way.
 

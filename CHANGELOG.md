@@ -17,6 +17,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The X11 backend is only used when XWayland is really reachable (the local
+  display socket is probed): a stale or forwarded `DISPLAY` — an SSH session,
+  a nested display — no longer diverts the window to a backend it cannot open,
+  it stays on Wayland instead.
 - Choosing an item made the window blink open and shut. Focus was handed back to
   the previous window *before* the clipboard was verified, so that focus change
   hid the popup again; if the user reopened it meanwhile, the two kept fighting
