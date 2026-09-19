@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] — 2026-09-19
+
+The Win+V keybinding could never be installed: gsettings answered
+
+    Schema "org.gnome.settings-daemon.plugins.media-keys" is not relocatable
+    (path must not be specified)
+
+### Fixed
+
+- `name`, `command` and `binding` are now written to the *relocatable child*
+  schema `org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:<path>`
+  instead of appending the path to the parent schema, which gsettings rejects.
+  Reading them back (`--status`, `owns_binding`) uses the same schema, so
+  `--status` shows `'<Super>v' -> '… --toggle'` instead of `- -> -`.
+- `tests/conftest.py`'s gsettings double now enforces the real schema rules
+  (unknown schema, missing path on a relocatable schema, path on a
+  non-relocatable one). Accepting every target is what let 2.0.0 ship with a
+  keybinding install that could not work.
+
 ## [2.0.1] — 2026-09-19
 
 Fixes two crashes that only show up with a real PyGObject (the test doubles
@@ -101,6 +120,7 @@ version 2.0.0 fixes the correctness problems that made 1.x unreliable.
 
 Initial release: floating Win+V window with search, pins and one click paste.
 
+[2.0.2]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/ahmad75naraghi/ubuntu-clipboard/releases/tag/v1.0.0

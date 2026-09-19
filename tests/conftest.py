@@ -43,7 +43,29 @@ def store(config):
 
 
 class FakeGsettings:
-    """Minimal stand-in for the ``gsettings`` binary."""
+    """Stand-in for the ``gsettings`` binary, including its schema rules.
+
+    The rules matter: ``org.gnome.settings-daemon.plugins.media-keys`` is not
+    relocatable, so ``...media-keys:<path>`` is an error — only the child schema
+    ``...media-keys.custom-keybinding:<path>`` accepts a path. A double that
+    accepted both forms hid a broken shortcut install for a whole release.
+    """
+
+    #: Schemas that accept ``schema:path``.
+    RELOCATABLE = frozenset(
+        {
+            "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding",
+            "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding.extra",
+        }
+    )
+    #: Schemas that exist at all, so a typo is caught instead of accepted.
+    KNOWN = frozenset(
+        {
+            "org.gnome.settings-daemon.plugins.media-keys",
+            "org.gnome.shell.keybindings",
+            *RELOCATABLE,
+        }
+    )
 
     def __init__(self, values: dict[str, str] | None = None) -> None:
         self.values = dict(values or {})
@@ -53,12 +75,32 @@ class FakeGsettings:
     def _key(target: str, key: str) -> str:
         return f"{target}|{key}"
 
+    def _validate(self, command: list[str], target: str) -> subprocess.CompletedProcess | None:
+        schema, _, path = target.partition(":")
+        if schema not in self.KNOWN:
+            return subprocess.CompletedProcess(command, 1, b"", f'Schema "{schema}" does not exist'.encode())
+        if path and schema not in self.RELOCATABLE:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                b"",
+                f'Schema "{schema}" is not relocatable (path must not be specified)'.encode(),
+            )
+        if not path and schema in self.RELOCATABLE:
+            return subprocess.CompletedProcess(
+                command, 1, b"", f'Schema "{schema}" is relocatable (path must be specified)'.encode()
+            )
+        return None
+
     def __call__(self, command, **_kwargs) -> subprocess.CompletedProcess:
         command = list(command)
         self.calls.append(command)
         if len(command) < 4 or command[0] != "gsettings":
             return subprocess.CompletedProcess(command, 2, b"", b"bad usage")
         action, target, key = command[1], command[2], command[3]
+        invalid = self._validate(command, target)
+        if invalid is not None:
+            return invalid
         lookup = self._key(target, key)
         if action == "get":
             if lookup not in self.values:

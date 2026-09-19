@@ -23,6 +23,11 @@ log = logging.getLogger(__name__)
 
 SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 KEY = "custom-keybindings"
+#: The list of bindings lives in SCHEMA, which is *not* relocatable, so
+#: ``$SCHEMA:<path>`` is rejected by gsettings. ``name``, ``command`` and
+#: ``binding`` belong to the relocatable child schema instead:
+#: ``org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:<path>``.
+CHILD_SCHEMA = f"{SCHEMA}.custom-keybinding"
 BASE_PATH = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
 SLOT = "ubuntu-clipboard"
 KEY_PATH = f"{BASE_PATH}{SLOT}/"
@@ -171,7 +176,7 @@ def format_list(paths: Sequence[str]) -> str:
 
 
 def binding_command(path: str, runner: Runner = subprocess.run) -> str:
-    return get_value(SCHEMA, "command", path, runner) or ""
+    return get_value(CHILD_SCHEMA, "command", path, runner) or ""
 
 
 def owns_binding(path: str, runner: Runner = subprocess.run) -> bool:
@@ -220,9 +225,9 @@ def status(runner: Runner = subprocess.run) -> dict[str, object]:
     return {
         "registered_paths": paths,
         "ours_listed": KEY_PATH in paths,
-        "name": get_value(SCHEMA, "name", KEY_PATH, runner),
-        "command": get_value(SCHEMA, "command", KEY_PATH, runner),
-        "binding": get_value(SCHEMA, "binding", KEY_PATH, runner),
+        "name": get_value(CHILD_SCHEMA, "name", KEY_PATH, runner),
+        "command": get_value(CHILD_SCHEMA, "command", KEY_PATH, runner),
+        "binding": get_value(CHILD_SCHEMA, "binding", KEY_PATH, runner),
     }
 
 
@@ -264,7 +269,7 @@ def install(
     failures = [
         f"{key} = {value} ({error})"
         for key, value in values
-        if (error := set_value_checked(SCHEMA, key, value, KEY_PATH, runner))
+        if (error := set_value_checked(CHILD_SCHEMA, key, value, KEY_PATH, runner))
     ]
     if failures:
         report.add("gsettings rejected " + "; ".join(failures))

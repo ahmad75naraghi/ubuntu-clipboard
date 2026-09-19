@@ -71,9 +71,9 @@ def test_install_registers_the_binding(fake_gsettings):
     report = install(runner=fake)
     assert report.ok is True
     assert fake.values[LIST_KEY] == f"['{OUR_PATH}']"
-    assert fake.values[f"{shortcut.SCHEMA}:{OUR_PATH}|binding"] == "'<Super>v'"
-    assert fake.values[f"{shortcut.SCHEMA}:{OUR_PATH}|command"] == f"'{BINARY} --toggle'"
-    assert "Win+V" in fake.values[f"{shortcut.SCHEMA}:{OUR_PATH}|name"]
+    assert fake.values[f"{shortcut.CHILD_SCHEMA}:{OUR_PATH}|binding"] == "'<Super>v'"
+    assert fake.values[f"{shortcut.CHILD_SCHEMA}:{OUR_PATH}|command"] == f"'{BINARY} --toggle'"
+    assert "Win+V" in fake.values[f"{shortcut.CHILD_SCHEMA}:{OUR_PATH}|name"]
 
 
 def test_install_is_idempotent(fake_gsettings):
@@ -99,7 +99,7 @@ def test_install_removes_stale_duplicates(fake_gsettings):
     fake = fake_gsettings(
         {
             LIST_KEY: f"['{OTHER_PATH}', '{OUR_PATH}']",
-            f"{shortcut.SCHEMA}:{OTHER_PATH}|command": f"'{BINARY} --toggle'",
+            f"{shortcut.CHILD_SCHEMA}:{OTHER_PATH}|command": f"'{BINARY} --toggle'",
         }
     )
     report = install(runner=fake)
@@ -148,7 +148,7 @@ def test_custom_binding_is_used(fake_gsettings):
     fake = fake_gsettings()
     report = install(runner=fake, binding="<Control><Alt>v")
     assert report.binding == "<Control><Alt>v"
-    assert fake.values[f"{shortcut.SCHEMA}:{OUR_PATH}|binding"] == "'<Control><Alt>v'"
+    assert fake.values[f"{shortcut.CHILD_SCHEMA}:{OUR_PATH}|binding"] == "'<Control><Alt>v'"
 
 
 def test_status_reports_the_current_state(fake_gsettings):
@@ -209,9 +209,9 @@ def test_uninstall_requires_gsettings(monkeypatch):
 
 
 def test_owns_binding_detects_both_commands(fake_gsettings):
-    fake = fake_gsettings({f"{shortcut.SCHEMA}:{OTHER_PATH}|command": "'python3 -m ubuntu_clipboard'"})
+    fake = fake_gsettings({f"{shortcut.CHILD_SCHEMA}:{OTHER_PATH}|command": "'python3 -m ubuntu_clipboard'"})
     assert shortcut.owns_binding(OTHER_PATH, runner=fake) is True
-    fake.values[f"{shortcut.SCHEMA}:{OTHER_PATH}|command"] = "'/usr/bin/something-else'"
+    fake.values[f"{shortcut.CHILD_SCHEMA}:{OTHER_PATH}|command"] = "'/usr/bin/something-else'"
     assert shortcut.owns_binding(OTHER_PATH, runner=fake) is False
 
 
@@ -255,3 +255,46 @@ def test_set_value_checked_explains_why_it_failed():
     assert shortcut.set_value_checked("s", "k", "v", runner=lambda *_a, **_k: None) == (
         "gsettings could not be run"
     )
+
+
+def test_bindings_are_written_to_the_relocatable_child_schema(fake_gsettings):
+    """``...media-keys:<path>`` is rejected by gsettings (not relocatable).
+
+    2.0.0 sent ``name``/``command``/``binding`` to the parent schema and every
+    install failed with "path must not be specified".
+    """
+    fake = fake_gsettings()
+    report = install(runner=fake)
+    assert report.ok is True, report.messages
+
+    targets = {command[2] for command in fake.calls if command[1] in {"get", "set"}}
+    parent_with_path = [target for target in targets if target.startswith(f"{shortcut.SCHEMA}:")]
+    assert parent_with_path == [], f"wrote to a non-relocatable schema: {parent_with_path}"
+    assert f"{shortcut.CHILD_SCHEMA}:{shortcut.KEY_PATH}" in targets
+    assert shortcut.SCHEMA in targets  # the binding list itself has no path
+
+
+def test_status_reads_the_child_schema(fake_gsettings):
+    fake = fake_gsettings(
+        {
+            f"{shortcut.SCHEMA}|{shortcut.KEY}": f"['{shortcut.KEY_PATH}']",
+            f"{shortcut.CHILD_SCHEMA}:{shortcut.KEY_PATH}|name": "'Clipboard — Win+V'",
+            f"{shortcut.CHILD_SCHEMA}:{shortcut.KEY_PATH}|command": "'/usr/bin/ubuntu-clipboard --toggle'",
+            f"{shortcut.CHILD_SCHEMA}:{shortcut.KEY_PATH}|binding": "'<Super>v'",
+        }
+    )
+    state = shortcut.status(runner=fake)
+    assert state["ours_listed"] is True
+    assert state["binding"] == "'<Super>v'"
+    assert "ubuntu-clipboard" in state["command"]
+
+
+def test_fake_gsettings_matches_the_real_schema_rules(fake_gsettings):
+    """The double has to reject what gsettings rejects, or bugs stay hidden."""
+    fake = fake_gsettings()
+    wrong = shortcut.get_value(f"{shortcut.SCHEMA}:{shortcut.KEY_PATH}", "name", runner=fake)
+    assert wrong is None
+    right = shortcut.set_value(f"{shortcut.CHILD_SCHEMA}", "name", "'x'", shortcut.KEY_PATH, runner=fake)
+    assert right is True
+    missing_path = shortcut.set_value(shortcut.CHILD_SCHEMA, "name", "'x'", runner=fake)
+    assert missing_path is False

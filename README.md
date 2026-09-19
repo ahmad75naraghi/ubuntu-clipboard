@@ -2,7 +2,7 @@
 
 > **Win+V** روی اوبونتو: پنجره شناور، جستجوی فوری، سنجاق کردن و Paste خودکار.
 
-![Version](https://img.shields.io/badge/version-2.0.1-blue)
+![Version](https://img.shields.io/badge/version-2.0.2-blue)
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04%20%7C%2024.04%20%7C%2024.10-E95420)
 ![GNOME](https://img.shields.io/badge/GNOME-Wayland%20%26%20X11-4A86CF)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB)
@@ -167,7 +167,7 @@ ubuntu-clipboard [options]
 
 ```console
 $ ubuntu-clipboard --status
-Ubuntu Clipboard 2.0.1
+Ubuntu Clipboard 2.0.2
   python           3.11.2 (/usr/bin/python3)
   session          wayland
   database         /home/user/.local/share/ubuntu-clipboard/history.db
@@ -338,6 +338,16 @@ gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
 اگر `--install-shortcut` ناموفق بود، خودِ پیام خطای `gsettings` چاپ می‌شود؛ در آن صورت
 میانبر را دستی بسازید: **Settings → Keyboard → Custom Shortcuts** با فرمان
 `ubuntu-clipboard --toggle` و کلید `<Super>v`.
+
+برای بررسی دستی، توجه کنید که فهرست میانبرها در schema مادر و مقدارهای هر میانبر در
+schema فرزندِ قابل‌جابه‌جایی ذخیره می‌شوند:
+
+```bash
+# فهرست مسیرها (بدون path — schema مادر قابل‌جابه‌جایی نیست)
+gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings
+# مقدارهای میانبر ما (path لازم است)
+gsettings get org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/ubuntu-clipboard/ binding
+```
 
 **پنجره باز می‌شود ولی Paste خودکار انجام نمی‌شود؟**
 
